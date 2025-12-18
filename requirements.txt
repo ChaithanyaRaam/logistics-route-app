@@ -4,3 +4,4 @@ numpy
 folium
 weasyprint
 openpyxl
+fastkml
