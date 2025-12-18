@@ -9,181 +9,242 @@ Original file is located at
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import math
+import requests
+from fastkml import kml
+from shapely.geometry import Point
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
-st.set_page_config(page_title="Multi-Warehouse Route Optimizer", layout="wide")
+st.set_page_config(
+    page_title="Multi-Warehouse Geo-Logical Route Optimizer",
+    layout="wide"
+)
+st.title("🚚 Multi-Warehouse Route Optimization (Geo-Logical Distance)")
 
 # --------------------------------------------------
-# HELPERS
+# GEO FUNCTIONS
 # --------------------------------------------------
-def euclidean_distance(lat1, lon1, lat2, lon2):
-    return math.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2)
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return 2 * R * math.asin(math.sqrt(a))
+
 
 def bearing(lat1, lon1, lat2, lon2):
-    """Angle for sweep routing"""
-    return math.atan2(lon2 - lon1, lat2 - lat1)
+    return math.atan2(
+        math.radians(lon2 - lon1),
+        math.radians(lat2 - lat1)
+    )
 
-def build_routes_sweep(df, wh_lat, wh_lon, wh_name, plan_type):
+# --------------------------------------------------
+# KML LOADER (FROM URL)
+# --------------------------------------------------
+def parse_kml_from_url(kml_url):
+    response = requests.get(kml_url, timeout=30)
+    response.raise_for_status()
+
+    k = kml.KML()
+    k.from_string(response.content)
+
+    rows = []
+
+    for document in k.features():
+        for folder in document.features():
+            for placemark in folder.features():
+                geom = placemark.geometry
+
+                # Point geometry
+                if geom.geom_type == "Point":
+                    rows.append({
+                        "Pincode": placemark.name.strip(),
+                        "Latitude": geom.y,
+                        "Longitude": geom.x,
+                        "TotalOrders": 1
+                    })
+
+                # Polygon / MultiPolygon → use centroid
+                elif geom.geom_type in ["Polygon", "MultiPolygon"]:
+                    centroid = geom.centroid
+                    rows.append({
+                        "Pincode": placemark.name.strip(),
+                        "Latitude": centroid.y,
+                        "Longitude": centroid.x,
+                        "TotalOrders": 1
+                    })
+
+    return pd.DataFrame(rows)
+
+# --------------------------------------------------
+# ROUTE BUILDERS
+# --------------------------------------------------
+def empty_route(plan_type):
+    return pd.DataFrame(columns=[
+        "Warehouse", "Biker_ID", "Pincode",
+        "Latitude", "Longitude", "TotalOrders",
+        "Sequence", "Plan_Type"
+    ])
+
+
+def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
     routes = []
 
     for biker in sorted(df["Biker_ID"].unique()):
-        group = df[df["Biker_ID"] == biker].to_dict("records")
+        group = df[df["Biker_ID"] == biker].copy()
 
-        pickup = {
+        group["Bearing"] = group.apply(
+            lambda x: bearing(wh_lat, wh_lon, x.Latitude, x.Longitude), axis=1
+        )
+        group["Distance"] = group.apply(
+            lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude), axis=1
+        )
+
+        group = group.sort_values(["Bearing", "Distance"])
+
+        seq = 1
+        routes.append({
             "Warehouse": wh_name,
             "Biker_ID": biker,
             "Pincode": wh_name,
             "Latitude": wh_lat,
             "Longitude": wh_lon,
-            "TotalOrders": 0
-        }
+            "TotalOrders": 0,
+            "Sequence": seq,
+            "Plan_Type": plan_type
+        })
 
-        # ---- SWEEP ROUTING ----
-        group_sorted = sorted(
-            group,
-            key=lambda x: bearing(
-                wh_lat, wh_lon,
-                x["Latitude"], x["Longitude"]
-            )
-        )
+        for _, r in group.iterrows():
+            seq += 1
+            routes.append({
+                "Warehouse": wh_name,
+                "Biker_ID": biker,
+                "Pincode": r["Pincode"],
+                "Latitude": r["Latitude"],
+                "Longitude": r["Longitude"],
+                "TotalOrders": r["TotalOrders"],
+                "Sequence": seq,
+                "Plan_Type": plan_type
+            })
 
-        route = [pickup] + group_sorted
-
-        for seq, stop in enumerate(route, start=1):
-            stop["Sequence"] = seq
-            stop["Plan_Type"] = plan_type
-            routes.append(stop)
+        seq += 1
+        routes.append({
+            "Warehouse": wh_name,
+            "Biker_ID": biker,
+            "Pincode": wh_name,
+            "Latitude": wh_lat,
+            "Longitude": wh_lon,
+            "TotalOrders": 0,
+            "Sequence": seq,
+            "Plan_Type": plan_type
+        })
 
     return pd.DataFrame(routes)
 
 # --------------------------------------------------
-# PLAN A – IDEAL CAPACITY BASED
+# PLAN A – CAPACITY BASED
 # --------------------------------------------------
-def plan_a(df, capacity_per_rider, wh_lat, wh_lon, wh_name):
-    assigned = []
+def plan_a(df, capacity, wh_lat, wh_lon, wh_name):
+    if df.empty:
+        return empty_route("Plan A")
+
     biker = 1
     load = 0
+    assigned = []
 
     for _, r in df.iterrows():
-        if load + r["TotalOrders"] > capacity_per_rider:
+        if load + r["TotalOrders"] > capacity:
             biker += 1
             load = 0
 
-        assigned.append({
-            "Warehouse": wh_name,
-            "Biker_ID": biker,
-            "Pincode": r["Pincode"],
-            "Latitude": r["Latitude"],
-            "Longitude": r["Longitude"],
-            "TotalOrders": r["TotalOrders"]
-        })
+        assigned.append({**r, "Biker_ID": biker})
         load += r["TotalOrders"]
 
-    return build_routes_sweep(
+    return build_geo_routes(
         pd.DataFrame(assigned),
         wh_lat, wh_lon, wh_name,
-        "Ideal Capacity Based"
+        "Plan A – Capacity Based"
     )
 
 # --------------------------------------------------
 # PLAN B – RIDER CONSTRAINED
 # --------------------------------------------------
 def plan_b(df, riders, wh_lat, wh_lon, wh_name):
+    if df.empty or riders == 0:
+        return empty_route("Plan B")
+
     assigned = []
-    rider_cycle = list(range(1, riders + 1))
+    rider_ids = list(range(1, riders + 1))
     idx = 0
 
     for _, r in df.iterrows():
-        assigned.append({
-            "Warehouse": wh_name,
-            "Biker_ID": rider_cycle[idx],
-            "Pincode": r["Pincode"],
-            "Latitude": r["Latitude"],
-            "Longitude": r["Longitude"],
-            "TotalOrders": r["TotalOrders"]
-        })
+        assigned.append({**r, "Biker_ID": rider_ids[idx]})
         idx = (idx + 1) % riders
 
-    result = build_routes_sweep(
+    return build_geo_routes(
         pd.DataFrame(assigned),
         wh_lat, wh_lon, wh_name,
-        "Rider Constrained"
+        "Plan B – Rider Constrained"
     )
 
-    load = (
-        result[result["TotalOrders"] > 0]
-        .groupby("Biker_ID")["TotalOrders"]
-        .sum()
-        .reset_index()
-        .rename(columns={"TotalOrders": "Total_Load"})
-    )
-
-    return result.merge(load, on="Biker_ID", how="left")
-
 # --------------------------------------------------
-# STREAMLIT UI
+# SIDEBAR – INPUTS
 # --------------------------------------------------
-st.title("🚚 Multi-Warehouse Route Optimization (Sweep Routing)")
+st.sidebar.header("Service Area")
 
-uploaded_file = st.file_uploader("Upload Orders Excel", type=["xlsx"])
+KML_URL = st.sidebar.text_input(
+    "Service Area KML URL",
+    "https://data.opencity.in/dataset/d71a695c-1d72-4d3e-bb33-a252a27d3a89/resource/90a62fd4-9154-4dbf-b633-e713a060c801/download/cb0beca1-23d7-4a61-8b53-927d6fb037ea.kml"
+)
 
-# --------------------
-# Warehouses
-# --------------------
-st.subheader("Warehouse 1 (Mandatory)")
-wh1_name = st.text_input("WH1 Name", "WH_1")
-wh1_lat = st.number_input("WH1 Latitude", value=13.02, format="%.6f")
-wh1_lon = st.number_input("WH1 Longitude", value=80.22, format="%.6f")
+st.sidebar.header("Warehouse 1")
+wh1_name = st.sidebar.text_input("WH1 Name", "WH_1")
+wh1_lat = st.sidebar.number_input("WH1 Latitude", value=13.02, format="%.6f")
+wh1_lon = st.sidebar.number_input("WH1 Longitude", value=80.22, format="%.6f")
 
-st.subheader("Warehouse 2 (Optional)")
-enable_wh2 = st.checkbox("Enable Warehouse 2")
+enable_wh2 = st.sidebar.checkbox("Enable Warehouse 2", value=True)
+
+wh2_name = "WH_2"
+wh2_lat = 13.08
+wh2_lon = 80.28
 
 if enable_wh2:
-    wh2_name = st.text_input("WH2 Name", "WH_2")
-    wh2_lat = st.number_input("WH2 Latitude", value=13.08, format="%.6f")
-    wh2_lon = st.number_input("WH2 Longitude", value=80.28, format="%.6f")
+    st.sidebar.header("Warehouse 2")
+    wh2_name = st.sidebar.text_input("WH2 Name", "WH_2")
+    wh2_lat = st.sidebar.number_input("WH2 Latitude", value=13.08, format="%.6f")
+    wh2_lon = st.sidebar.number_input("WH2 Longitude", value=80.28, format="%.6f")
 
-# --------------------
-# Riders
-# --------------------
-st.subheader("Rider Inputs")
-total_riders = st.number_input("Total Riders", 1, 200, 10)
-capacity_per_rider = st.number_input("Max Orders per Rider (Plan A)", 1, 50, 10)
-
-st.subheader("Rider Override (Optional)")
-wh1_override = st.number_input("Warehouse 1 Riders (0 = auto)", 0, total_riders, 0)
-wh2_override = st.number_input("Warehouse 2 Riders (0 = auto)", 0, total_riders, 0)
+st.sidebar.header("Riders")
+total_riders = st.sidebar.number_input("Total Riders", 1, 200, 10)
+capacity_per_rider = st.sidebar.number_input("Max Orders per Rider (Plan A)", 1, 50, 10)
 
 # --------------------------------------------------
-# GENERATE
+# LOAD DATA
 # --------------------------------------------------
-if st.button("Generate Plans"):
-    if uploaded_file is None:
-        st.warning("Please upload an Excel file")
+if st.button("Load & Generate Plans"):
+    try:
+        base = parse_kml_from_url(KML_URL)
+        st.success(f"Loaded {len(base)} service areas from KML")
+    except Exception as e:
+        st.error(f"KML load failed: {e}")
         st.stop()
 
-    df = pd.read_excel(uploaded_file)
-
-    base = (
-        df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
-        .sum()
-        .reset_index()
-        .rename(columns={"Orders": "TotalOrders"})
-    )
-
-    # --------------------
-    # CLUSTER BY PROXIMITY
-    # --------------------
+    # --------------------------------------------------
+    # CLUSTER BY NEAREST WAREHOUSE
+    # --------------------------------------------------
     if enable_wh2:
         base["Dist_WH1"] = base.apply(
-            lambda x: euclidean_distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
+            lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
         )
         base["Dist_WH2"] = base.apply(
-            lambda x: euclidean_distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
+            lambda x: haversine(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
         )
 
         wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]].copy()
@@ -192,52 +253,44 @@ if st.button("Generate Plans"):
         wh1_df = base.copy()
         wh2_df = pd.DataFrame()
 
-    # --------------------
-    # RIDER ALLOCATION
-    # --------------------
+    # --------------------------------------------------
+    # RIDER SPLIT
+    # --------------------------------------------------
     if enable_wh2:
-        if wh1_override > 0 and wh2_override > 0:
-            if wh1_override + wh2_override > total_riders:
-                st.error("WH1 + WH2 riders exceed Total Riders")
-                st.stop()
-            wh1_riders = wh1_override
-            wh2_riders = wh2_override
-        else:
-            total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
-            wh1_share = wh1_df["TotalOrders"].sum() / total_orders if total_orders > 0 else 0.5
-            wh1_riders = max(1, round(total_riders * wh1_share))
-            wh2_riders = total_riders - wh1_riders
+        total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
+        wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
+        wh2_riders = total_riders - wh1_riders
     else:
         wh1_riders = total_riders
         wh2_riders = 0
 
-    # --------------------
-    # GLOBAL PLANS
-    # --------------------
+    # --------------------------------------------------
+    # GENERATE PLANS
+    # --------------------------------------------------
     global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
     global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
 
-    # --------------------
-    # WAREHOUSE PLANS
-    # --------------------
     wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, wh1_name)
     wh1_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, wh1_name)
 
-    st.download_button("⬇ Global Plan A", global_a.to_csv(index=False), "Plan_A_Global.csv")
-    st.download_button("⬇ Global Plan B", global_b.to_csv(index=False), "Plan_B_Global.csv")
-    st.download_button("⬇ WH1 Plan A", wh1_a.to_csv(index=False), "WH1_Plan_A.csv")
-    st.download_button("⬇ WH1 Plan B", wh1_b.to_csv(index=False), "WH1_Plan_B.csv")
+    wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
+    wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, wh2_name)
 
-    if enable_wh2 and not wh2_df.empty:
-        wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
-        wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, wh2_name)
+    # --------------------------------------------------
+    # DOWNLOADS
+    # --------------------------------------------------
+    st.subheader("⬇ Download Route Plans")
 
-        st.download_button("⬇ WH2 Plan A", wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
-        st.download_button("⬇ WH2 Plan B", wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
+    st.download_button("⬇ Plan A – Global", global_a.to_csv(index=False), "Plan_A_Global.csv")
+    st.download_button("⬇ Plan B – Global", global_b.to_csv(index=False), "Plan_B_Global.csv")
+    st.download_button("⬇ Plan A – WH1", wh1_a.to_csv(index=False), "WH1_Plan_A.csv")
+    st.download_button("⬇ Plan B – WH1", wh1_b.to_csv(index=False), "WH1_Plan_B.csv")
+    st.download_button("⬇ Plan A – WH2", wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
+    st.download_button("⬇ Plan B – WH2", wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
 
-    # --------------------
+    # --------------------------------------------------
     # SUMMARY
-    # --------------------
+    # --------------------------------------------------
     st.subheader("🚦 Rider Allocation Summary")
 
     summary = pd.DataFrame([
