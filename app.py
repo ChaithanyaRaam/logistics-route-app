@@ -11,8 +11,7 @@ import streamlit as st
 import pandas as pd
 import math
 import requests
-from fastkml import kml
-from shapely.geometry import Point
+import xml.etree.ElementTree as ET
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -46,40 +45,32 @@ def bearing(lat1, lon1, lat2, lon2):
     )
 
 # --------------------------------------------------
-# KML LOADER (FROM URL)
+# KML PARSER (PURE XML, CLOUD SAFE)
 # --------------------------------------------------
 def parse_kml_from_url(kml_url):
     response = requests.get(kml_url, timeout=30)
     response.raise_for_status()
 
-    k = kml.KML()
-    k.from_string(response.content)
+    root = ET.fromstring(response.content)
+    ns = {"kml": "http://www.opengis.net/kml/2.2"}
 
     rows = []
 
-    for document in k.features():
-        for folder in document.features():
-            for placemark in folder.features():
-                geom = placemark.geometry
+    for placemark in root.findall(".//kml:Placemark", ns):
+        name = placemark.find("kml:name", ns)
+        coord = placemark.find(".//kml:coordinates", ns)
 
-                # Point geometry
-                if geom.geom_type == "Point":
-                    rows.append({
-                        "Pincode": placemark.name.strip(),
-                        "Latitude": geom.y,
-                        "Longitude": geom.x,
-                        "TotalOrders": 1
-                    })
+        if name is None or coord is None:
+            continue
 
-                # Polygon / MultiPolygon → use centroid
-                elif geom.geom_type in ["Polygon", "MultiPolygon"]:
-                    centroid = geom.centroid
-                    rows.append({
-                        "Pincode": placemark.name.strip(),
-                        "Latitude": centroid.y,
-                        "Longitude": centroid.x,
-                        "TotalOrders": 1
-                    })
+        lon, lat, *_ = coord.text.strip().split(",")
+
+        rows.append({
+            "Pincode": name.text.strip(),
+            "Latitude": float(lat),
+            "Longitude": float(lon),
+            "TotalOrders": 1
+        })
 
     return pd.DataFrame(rows)
 
@@ -195,7 +186,7 @@ def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     )
 
 # --------------------------------------------------
-# SIDEBAR – INPUTS
+# SIDEBAR INPUTS
 # --------------------------------------------------
 st.sidebar.header("Service Area")
 
@@ -226,19 +217,12 @@ total_riders = st.sidebar.number_input("Total Riders", 1, 200, 10)
 capacity_per_rider = st.sidebar.number_input("Max Orders per Rider (Plan A)", 1, 50, 10)
 
 # --------------------------------------------------
-# LOAD DATA
+# EXECUTION
 # --------------------------------------------------
 if st.button("Load & Generate Plans"):
-    try:
-        base = parse_kml_from_url(KML_URL)
-        st.success(f"Loaded {len(base)} service areas from KML")
-    except Exception as e:
-        st.error(f"KML load failed: {e}")
-        st.stop()
+    base = parse_kml_from_url(KML_URL)
+    st.success(f"Loaded {len(base)} pincodes from KML")
 
-    # --------------------------------------------------
-    # CLUSTER BY NEAREST WAREHOUSE
-    # --------------------------------------------------
     if enable_wh2:
         base["Dist_WH1"] = base.apply(
             lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
@@ -253,9 +237,6 @@ if st.button("Load & Generate Plans"):
         wh1_df = base.copy()
         wh2_df = pd.DataFrame()
 
-    # --------------------------------------------------
-    # RIDER SPLIT
-    # --------------------------------------------------
     if enable_wh2:
         total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
         wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
@@ -264,9 +245,6 @@ if st.button("Load & Generate Plans"):
         wh1_riders = total_riders
         wh2_riders = 0
 
-    # --------------------------------------------------
-    # GENERATE PLANS
-    # --------------------------------------------------
     global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
     global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
 
@@ -276,9 +254,6 @@ if st.button("Load & Generate Plans"):
     wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
     wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, wh2_name)
 
-    # --------------------------------------------------
-    # DOWNLOADS
-    # --------------------------------------------------
     st.subheader("⬇ Download Route Plans")
 
     st.download_button("⬇ Plan A – Global", global_a.to_csv(index=False), "Plan_A_Global.csv")
@@ -288,9 +263,6 @@ if st.button("Load & Generate Plans"):
     st.download_button("⬇ Plan A – WH2", wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
     st.download_button("⬇ Plan B – WH2", wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
 
-    # --------------------------------------------------
-    # SUMMARY
-    # --------------------------------------------------
     st.subheader("🚦 Rider Allocation Summary")
 
     summary = pd.DataFrame([
