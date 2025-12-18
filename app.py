@@ -15,13 +15,16 @@ import math
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
-st.set_page_config(page_title="Multi-Warehouse Route Optimizer", layout="wide")
+st.set_page_config(
+    page_title="Multi-Warehouse Route Optimizer",
+    layout="wide"
+)
 
 # --------------------------------------------------
 # HELPERS
 # --------------------------------------------------
 def distance(lat1, lon1, lat2, lon2):
-    return np.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2)
+    return np.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
 
 def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
     routes = []
@@ -61,17 +64,17 @@ def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
     return pd.DataFrame(routes)
 
 # --------------------------------------------------
-# PLAN A – IDEAL CAPACITY
+# PLAN A – IDEAL CAPACITY BASED
 # --------------------------------------------------
-def plan_a(df, capacity, pickup_lat, pickup_lon, pickup_name):
+def plan_a(df, capacity_per_rider, pickup_lat, pickup_lon, pickup_name):
     assigned = []
     biker = 1
-    load = 0
+    used_capacity = 0
 
     for _, r in df.iterrows():
-        if load + r["TotalOrders"] > capacity:
+        if used_capacity + r["TotalOrders"] > capacity_per_rider:
             biker += 1
-            load = 0
+            used_capacity = 0
 
         assigned.append({
             "Warehouse": pickup_name,
@@ -81,11 +84,13 @@ def plan_a(df, capacity, pickup_lat, pickup_lon, pickup_name):
             "Longitude": r["Longitude"],
             "TotalOrders": r["TotalOrders"]
         })
-        load += r["TotalOrders"]
+        used_capacity += r["TotalOrders"]
 
     return build_routes(
         pd.DataFrame(assigned),
-        pickup_lat, pickup_lon, pickup_name,
+        pickup_lat,
+        pickup_lon,
+        pickup_name,
         "Ideal Capacity Based"
     )
 
@@ -110,7 +115,9 @@ def plan_b(df, riders, pickup_lat, pickup_lon, pickup_name):
 
     result = build_routes(
         pd.DataFrame(assigned),
-        pickup_lat, pickup_lon, pickup_name,
+        pickup_lat,
+        pickup_lon,
+        pickup_name,
         "Rider Constrained"
     )
 
@@ -131,8 +138,11 @@ st.title("🚚 Multi-Warehouse Route Optimization")
 
 uploaded_file = st.file_uploader("Upload Orders Excel", type=["xlsx"])
 
+# --------------------
+# Warehouses
+# --------------------
 st.subheader("Warehouse 1 (Mandatory)")
-wh1_name = st.text_input("WH1 Name", "WH_CHENNAI")
+wh1_name = st.text_input("WH1 Name", "WH_1")
 wh1_lat = st.number_input("WH1 Latitude", value=13.0827, format="%.6f")
 wh1_lon = st.number_input("WH1 Longitude", value=80.2707, format="%.6f")
 
@@ -144,81 +154,117 @@ if enable_wh2:
     wh2_lat = st.number_input("WH2 Latitude", value=12.9716, format="%.6f")
     wh2_lon = st.number_input("WH2 Longitude", value=77.5946, format="%.6f")
 
+# --------------------
+# Riders
+# --------------------
 st.subheader("Rider Inputs")
-available_riders = st.number_input("Available Riders", 1, 100, 5)
-capacity_per_rider = st.number_input("Max Orders per Rider", 1, 50, 10)
+total_riders = st.number_input("Total Riders", 1, 200, 10)
+capacity_per_rider = st.number_input("Max Orders per Rider (Plan A)", 1, 50, 10)
+
+st.subheader("Rider Override (Optional)")
+wh1_override = st.number_input(
+    "Warehouse 1 Riders (0 = auto)",
+    min_value=0,
+    max_value=total_riders,
+    value=0
+)
+
+wh2_override = st.number_input(
+    "Warehouse 2 Riders (0 = auto)",
+    min_value=0,
+    max_value=total_riders,
+    value=0
+)
 
 # --------------------------------------------------
-# RUN
+# GENERATE
 # --------------------------------------------------
 if st.button("Generate Plans"):
     if uploaded_file is None:
-        st.warning("Upload file first")
+        st.warning("Please upload an Excel file")
+        st.stop()
+
+    df = pd.read_excel(uploaded_file)
+
+    base = (
+        df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Orders": "TotalOrders"})
+    )
+
+    # --------------------
+    # CLUSTER BY PROXIMITY
+    # --------------------
+    if enable_wh2:
+        base["Dist_WH1"] = base.apply(
+            lambda x: distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
+        )
+        base["Dist_WH2"] = base.apply(
+            lambda x: distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
+        )
+
+        wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]].copy()
+        wh2_df = base[base["Dist_WH1"] > base["Dist_WH2"]].copy()
     else:
-        df = pd.read_excel(uploaded_file)
+        wh1_df = base.copy()
+        wh2_df = pd.DataFrame()
 
-        base = (
-            df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
-            .sum()
-            .reset_index()
-            .rename(columns={"Orders": "TotalOrders"})
-        )
-
-        # Cluster by proximity
-        if enable_wh2:
-            base["Dist_WH1"] = base.apply(
-                lambda x: distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
-            )
-            base["Dist_WH2"] = base.apply(
-                lambda x: distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
-            )
-            wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]]
-            wh2_df = base[base["Dist_WH1"] > base["Dist_WH2"]]
+    # --------------------
+    # RIDER ALLOCATION
+    # --------------------
+    if enable_wh2:
+        if wh1_override > 0 and wh2_override > 0:
+            if wh1_override + wh2_override > total_riders:
+                st.error("WH1 + WH2 riders exceed Total Riders")
+                st.stop()
+            wh1_riders = wh1_override
+            wh2_riders = wh2_override
         else:
-            wh1_df = base
-            wh2_df = pd.DataFrame()
+            total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
+            wh1_share = wh1_df["TotalOrders"].sum() / total_orders if total_orders > 0 else 0.5
+            wh1_riders = max(1, round(total_riders * wh1_share))
+            wh2_riders = total_riders - wh1_riders
+    else:
+        wh1_riders = total_riders
+        wh2_riders = 0
 
-        # GLOBAL PLANS
-        global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
-        global_b = plan_b(base, available_riders, wh1_lat, wh1_lon, "GLOBAL")
+    # --------------------
+    # GLOBAL PLANS
+    # --------------------
+    global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
+    global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
 
-        # WH1 PLANS
-        wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, wh1_name)
-        wh1_b = plan_b(wh1_df, available_riders, wh1_lat, wh1_lon, wh1_name)
+    # --------------------
+    # WAREHOUSE PLANS
+    # --------------------
+    wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, wh1_name)
+    wh1_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, wh1_name)
 
-        st.download_button(
-            "⬇ Global Plan A",
-            global_a.to_csv(index=False),
-            "Plan_A_Ideal_Capacity_Based.csv"
-        )
-        st.download_button(
-            "⬇ Global Plan B",
-            global_b.to_csv(index=False),
-            "Plan_B_Riders_Constrained.csv"
-        )
-        st.download_button(
-            "⬇ WH1 Plan A",
-            wh1_a.to_csv(index=False),
-            "WH1_Plan_A_Ideal_Capacity.csv"
-        )
-        st.download_button(
-            "⬇ WH1 Plan B",
-            wh1_b.to_csv(index=False),
-            "WH1_Plan_B_Rider_Constrained.csv"
-        )
+    st.download_button("⬇ Global Plan A", global_a.to_csv(index=False), "Plan_A_Global.csv")
+    st.download_button("⬇ Global Plan B", global_b.to_csv(index=False), "Plan_B_Global.csv")
+    st.download_button("⬇ WH1 Plan A", wh1_a.to_csv(index=False), "WH1_Plan_A.csv")
+    st.download_button("⬇ WH1 Plan B", wh1_b.to_csv(index=False), "WH1_Plan_B.csv")
 
-        if enable_wh2 and not wh2_df.empty:
-            wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
-            wh2_b = plan_b(wh2_df, available_riders, wh2_lat, wh2_lon, wh2_name)
+    if enable_wh2 and not wh2_df.empty:
+        wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
+        wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, wh2_name)
 
-            st.download_button(
-                "⬇ WH2 Plan A",
-                wh2_a.to_csv(index=False),
-                "WH2_Plan_A_Ideal_Capacity.csv"
-            )
-            st.download_button(
-                "⬇ WH2 Plan B",
-                wh2_b.to_csv(index=False),
-                "WH2_Plan_B_Rider_Constrained.csv"
-            )
+        st.download_button("⬇ WH2 Plan A", wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
+        st.download_button("⬇ WH2 Plan B", wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
+
+    # --------------------
+    # SUMMARY
+    # --------------------
+    st.subheader("🚦 Rider Allocation Summary")
+
+    summary = pd.DataFrame([
+        {"Warehouse": wh1_name, "Orders": wh1_df["TotalOrders"].sum(), "Riders": wh1_riders},
+        {"Warehouse": wh2_name if enable_wh2 else "-",
+         "Orders": wh2_df["TotalOrders"].sum() if enable_wh2 else 0,
+         "Riders": wh2_riders}
+    ])
+
+    summary["Orders per Rider"] = (summary["Orders"] / summary["Riders"]).round(2)
+    st.dataframe(summary)
 
