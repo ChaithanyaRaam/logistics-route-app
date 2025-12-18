@@ -45,7 +45,7 @@ def bearing(lat1, lon1, lat2, lon2):
     )
 
 # --------------------------------------------------
-# KML PARSER (PURE XML, CLOUD SAFE)
+# KML PARSER (PURE XML – CLOUD SAFE)
 # --------------------------------------------------
 def parse_kml_from_url(kml_url):
     response = requests.get(kml_url, timeout=30)
@@ -68,8 +68,7 @@ def parse_kml_from_url(kml_url):
         rows.append({
             "Pincode": name.text.strip(),
             "Latitude": float(lat),
-            "Longitude": float(lon),
-            "TotalOrders": 1
+            "Longitude": float(lon)
         })
 
     return pd.DataFrame(rows)
@@ -186,13 +185,19 @@ def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     )
 
 # --------------------------------------------------
-# SIDEBAR INPUTS
+# SIDEBAR – INPUTS
 # --------------------------------------------------
 st.sidebar.header("Service Area")
 
 KML_URL = st.sidebar.text_input(
     "Service Area KML URL",
     "https://data.opencity.in/dataset/d71a695c-1d72-4d3e-bb33-a252a27d3a89/resource/90a62fd4-9154-4dbf-b633-e713a060c801/download/cb0beca1-23d7-4a61-8b53-927d6fb037ea.kml"
+)
+
+st.sidebar.header("Upload Orders")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Pincode Orders (CSV / Excel)",
+    type=["csv", "xlsx"]
 )
 
 st.sidebar.header("Warehouse 1")
@@ -220,9 +225,39 @@ capacity_per_rider = st.sidebar.number_input("Max Orders per Rider (Plan A)", 1,
 # EXECUTION
 # --------------------------------------------------
 if st.button("Load & Generate Plans"):
-    base = parse_kml_from_url(KML_URL)
-    st.success(f"Loaded {len(base)} pincodes from KML")
 
+    # Load service area
+    base = parse_kml_from_url(KML_URL)
+
+    # Load orders
+    if uploaded_file is not None:
+        if uploaded_file.name.endswith(".csv"):
+            orders_df = pd.read_csv(uploaded_file)
+        else:
+            orders_df = pd.read_excel(uploaded_file)
+
+        orders_df.columns = orders_df.columns.str.strip()
+
+        if "Pincode" not in orders_df.columns or "Orders" not in orders_df.columns:
+            st.error("Uploaded file must contain columns: Pincode, Orders")
+            st.stop()
+
+        orders_df = (
+            orders_df.groupby("Pincode")["Orders"]
+            .sum()
+            .reset_index()
+        )
+
+        base = base.merge(orders_df, on="Pincode", how="left")
+        base["TotalOrders"] = base["Orders"].fillna(0).astype(int)
+    else:
+        st.warning("No order file uploaded. Assuming 1 order per pincode.")
+        base["TotalOrders"] = 1
+
+    base = base[base["TotalOrders"] > 0].copy()
+    st.success(f"Loaded {len(base)} active pincodes")
+
+    # Warehouse clustering
     if enable_wh2:
         base["Dist_WH1"] = base.apply(
             lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
@@ -237,6 +272,7 @@ if st.button("Load & Generate Plans"):
         wh1_df = base.copy()
         wh2_df = pd.DataFrame()
 
+    # Rider split
     if enable_wh2:
         total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
         wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
@@ -245,6 +281,7 @@ if st.button("Load & Generate Plans"):
         wh1_riders = total_riders
         wh2_riders = 0
 
+    # Plans
     global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
     global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
 
@@ -254,8 +291,8 @@ if st.button("Load & Generate Plans"):
     wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
     wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, wh2_name)
 
+    # Downloads
     st.subheader("⬇ Download Route Plans")
-
     st.download_button("⬇ Plan A – Global", global_a.to_csv(index=False), "Plan_A_Global.csv")
     st.download_button("⬇ Plan B – Global", global_b.to_csv(index=False), "Plan_B_Global.csv")
     st.download_button("⬇ Plan A – WH1", wh1_a.to_csv(index=False), "WH1_Plan_A.csv")
@@ -263,15 +300,14 @@ if st.button("Load & Generate Plans"):
     st.download_button("⬇ Plan A – WH2", wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
     st.download_button("⬇ Plan B – WH2", wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
 
+    # Summary
     st.subheader("🚦 Rider Allocation Summary")
-
     summary = pd.DataFrame([
         {"Warehouse": wh1_name, "Orders": wh1_df["TotalOrders"].sum(), "Riders": wh1_riders},
         {"Warehouse": wh2_name if enable_wh2 else "-",
          "Orders": wh2_df["TotalOrders"].sum() if enable_wh2 else 0,
          "Riders": wh2_riders}
     ])
-
     summary["Orders per Rider"] = (summary["Orders"] / summary["Riders"]).round(2)
     st.dataframe(summary)
 
