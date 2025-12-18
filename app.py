@@ -15,46 +15,43 @@ import math
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
-st.set_page_config(
-    page_title="Multi-Warehouse Route Optimizer",
-    layout="wide"
-)
+st.set_page_config(page_title="Multi-Warehouse Route Optimizer", layout="wide")
 
 # --------------------------------------------------
 # HELPERS
 # --------------------------------------------------
-def distance(lat1, lon1, lat2, lon2):
-    return np.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
+def euclidean_distance(lat1, lon1, lat2, lon2):
+    return math.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2)
 
-def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
+def bearing(lat1, lon1, lat2, lon2):
+    """Angle for sweep routing"""
+    return math.atan2(lon2 - lon1, lat2 - lat1)
+
+def build_routes_sweep(df, wh_lat, wh_lon, wh_name, plan_type):
     routes = []
 
     for biker in sorted(df["Biker_ID"].unique()):
         group = df[df["Biker_ID"] == biker].to_dict("records")
 
         pickup = {
-            "Warehouse": pickup_name,
+            "Warehouse": wh_name,
             "Biker_ID": biker,
-            "Pincode": pickup_name,
-            "Latitude": pickup_lat,
-            "Longitude": pickup_lon,
+            "Pincode": wh_name,
+            "Latitude": wh_lat,
+            "Longitude": wh_lon,
             "TotalOrders": 0
         }
 
-        route = [pickup]
-        current = pickup
-
-        while group:
-            nearest = min(
-                group,
-                key=lambda x: distance(
-                    current["Latitude"], current["Longitude"],
-                    x["Latitude"], x["Longitude"]
-                )
+        # ---- SWEEP ROUTING ----
+        group_sorted = sorted(
+            group,
+            key=lambda x: bearing(
+                wh_lat, wh_lon,
+                x["Latitude"], x["Longitude"]
             )
-            route.append(nearest)
-            group.remove(nearest)
-            current = nearest
+        )
+
+        route = [pickup] + group_sorted
 
         for seq, stop in enumerate(route, start=1):
             stop["Sequence"] = seq
@@ -66,46 +63,44 @@ def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
 # --------------------------------------------------
 # PLAN A – IDEAL CAPACITY BASED
 # --------------------------------------------------
-def plan_a(df, capacity_per_rider, pickup_lat, pickup_lon, pickup_name):
+def plan_a(df, capacity_per_rider, wh_lat, wh_lon, wh_name):
     assigned = []
     biker = 1
-    used_capacity = 0
+    load = 0
 
     for _, r in df.iterrows():
-        if used_capacity + r["TotalOrders"] > capacity_per_rider:
+        if load + r["TotalOrders"] > capacity_per_rider:
             biker += 1
-            used_capacity = 0
+            load = 0
 
         assigned.append({
-            "Warehouse": pickup_name,
+            "Warehouse": wh_name,
             "Biker_ID": biker,
             "Pincode": r["Pincode"],
             "Latitude": r["Latitude"],
             "Longitude": r["Longitude"],
             "TotalOrders": r["TotalOrders"]
         })
-        used_capacity += r["TotalOrders"]
+        load += r["TotalOrders"]
 
-    return build_routes(
+    return build_routes_sweep(
         pd.DataFrame(assigned),
-        pickup_lat,
-        pickup_lon,
-        pickup_name,
+        wh_lat, wh_lon, wh_name,
         "Ideal Capacity Based"
     )
 
 # --------------------------------------------------
 # PLAN B – RIDER CONSTRAINED
 # --------------------------------------------------
-def plan_b(df, riders, pickup_lat, pickup_lon, pickup_name):
+def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     assigned = []
-    cycle = list(range(1, riders + 1))
+    rider_cycle = list(range(1, riders + 1))
     idx = 0
 
     for _, r in df.iterrows():
         assigned.append({
-            "Warehouse": pickup_name,
-            "Biker_ID": cycle[idx],
+            "Warehouse": wh_name,
+            "Biker_ID": rider_cycle[idx],
             "Pincode": r["Pincode"],
             "Latitude": r["Latitude"],
             "Longitude": r["Longitude"],
@@ -113,11 +108,9 @@ def plan_b(df, riders, pickup_lat, pickup_lon, pickup_name):
         })
         idx = (idx + 1) % riders
 
-    result = build_routes(
+    result = build_routes_sweep(
         pd.DataFrame(assigned),
-        pickup_lat,
-        pickup_lon,
-        pickup_name,
+        wh_lat, wh_lon, wh_name,
         "Rider Constrained"
     )
 
@@ -134,7 +127,7 @@ def plan_b(df, riders, pickup_lat, pickup_lon, pickup_name):
 # --------------------------------------------------
 # STREAMLIT UI
 # --------------------------------------------------
-st.title("🚚 Multi-Warehouse Route Optimization")
+st.title("🚚 Multi-Warehouse Route Optimization (Sweep Routing)")
 
 uploaded_file = st.file_uploader("Upload Orders Excel", type=["xlsx"])
 
@@ -143,16 +136,16 @@ uploaded_file = st.file_uploader("Upload Orders Excel", type=["xlsx"])
 # --------------------
 st.subheader("Warehouse 1 (Mandatory)")
 wh1_name = st.text_input("WH1 Name", "WH_1")
-wh1_lat = st.number_input("WH1 Latitude", value=13.0827, format="%.6f")
-wh1_lon = st.number_input("WH1 Longitude", value=80.2707, format="%.6f")
+wh1_lat = st.number_input("WH1 Latitude", value=13.02, format="%.6f")
+wh1_lon = st.number_input("WH1 Longitude", value=80.22, format="%.6f")
 
 st.subheader("Warehouse 2 (Optional)")
 enable_wh2 = st.checkbox("Enable Warehouse 2")
 
 if enable_wh2:
     wh2_name = st.text_input("WH2 Name", "WH_2")
-    wh2_lat = st.number_input("WH2 Latitude", value=12.9716, format="%.6f")
-    wh2_lon = st.number_input("WH2 Longitude", value=77.5946, format="%.6f")
+    wh2_lat = st.number_input("WH2 Latitude", value=13.08, format="%.6f")
+    wh2_lon = st.number_input("WH2 Longitude", value=80.28, format="%.6f")
 
 # --------------------
 # Riders
@@ -162,19 +155,8 @@ total_riders = st.number_input("Total Riders", 1, 200, 10)
 capacity_per_rider = st.number_input("Max Orders per Rider (Plan A)", 1, 50, 10)
 
 st.subheader("Rider Override (Optional)")
-wh1_override = st.number_input(
-    "Warehouse 1 Riders (0 = auto)",
-    min_value=0,
-    max_value=total_riders,
-    value=0
-)
-
-wh2_override = st.number_input(
-    "Warehouse 2 Riders (0 = auto)",
-    min_value=0,
-    max_value=total_riders,
-    value=0
-)
+wh1_override = st.number_input("Warehouse 1 Riders (0 = auto)", 0, total_riders, 0)
+wh2_override = st.number_input("Warehouse 2 Riders (0 = auto)", 0, total_riders, 0)
 
 # --------------------------------------------------
 # GENERATE
@@ -198,10 +180,10 @@ if st.button("Generate Plans"):
     # --------------------
     if enable_wh2:
         base["Dist_WH1"] = base.apply(
-            lambda x: distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
+            lambda x: euclidean_distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
         )
         base["Dist_WH2"] = base.apply(
-            lambda x: distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
+            lambda x: euclidean_distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
         )
 
         wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]].copy()
