@@ -11,137 +11,26 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import math
-import io
-import folium
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
-st.set_page_config(
-    page_title="Logistics Route Optimization",
-    layout="wide"
-)
+st.set_page_config(page_title="Multi-Warehouse Route Optimizer", layout="wide")
 
 # --------------------------------------------------
 # HELPERS
 # --------------------------------------------------
-def get_distance(lat1, lon1, lat2, lon2):
-    return np.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
+def distance(lat1, lon1, lat2, lon2):
+    return np.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2)
 
-# --------------------------------------------------
-# PLAN A – IDEAL CAPACITY BASED
-# --------------------------------------------------
-def plan_a_capacity_based(
-    uploaded_file,
-    capacity_per_biker,
-    pickup_lat,
-    pickup_lon,
-    pickup_name
-):
-    df = pd.read_excel(uploaded_file)
-
-    stops = (
-        df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
-        .sum()
-        .reset_index()
-        .rename(columns={"Orders": "TotalOrders"})
-        .sort_values("Pincode")
-        .reset_index(drop=True)
-    )
-
-    assigned = []
-    biker_id = 1
-    used_capacity = 0
-
-    for _, r in stops.iterrows():
-        if used_capacity + r["TotalOrders"] > capacity_per_biker:
-            biker_id += 1
-            used_capacity = 0
-
-        assigned.append({
-            "Biker_ID": biker_id,
-            "Pincode": r["Pincode"],
-            "Latitude": r["Latitude"],
-            "Longitude": r["Longitude"],
-            "TotalOrders": r["TotalOrders"]
-        })
-        used_capacity += r["TotalOrders"]
-
-    assigned_df = pd.DataFrame(assigned)
-
-    return build_routes(
-        assigned_df,
-        pickup_lat,
-        pickup_lon,
-        pickup_name,
-        plan_type="Ideal Capacity Based"
-    )
-
-# --------------------------------------------------
-# PLAN B – RIDER CONSTRAINED
-# --------------------------------------------------
-def plan_b_rider_constrained(
-    uploaded_file,
-    available_bikers,
-    pickup_lat,
-    pickup_lon,
-    pickup_name
-):
-    df = pd.read_excel(uploaded_file)
-
-    stops = (
-        df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
-        .sum()
-        .reset_index()
-        .rename(columns={"Orders": "TotalOrders"})
-        .sort_values("Pincode")
-        .reset_index(drop=True)
-    )
-
-    assigned = []
-    rider_cycle = list(range(1, available_bikers + 1))
-    idx = 0
-
-    for _, r in stops.iterrows():
-        assigned.append({
-            "Biker_ID": rider_cycle[idx],
-            "Pincode": r["Pincode"],
-            "Latitude": r["Latitude"],
-            "Longitude": r["Longitude"],
-            "TotalOrders": r["TotalOrders"]
-        })
-        idx = (idx + 1) % available_bikers
-
-    assigned_df = pd.DataFrame(assigned)
-
-    final_df = build_routes(
-        assigned_df,
-        pickup_lat,
-        pickup_lon,
-        pickup_name,
-        plan_type="Rider Constrained"
-    )
-
-    load = (
-        final_df[final_df["TotalOrders"] > 0]
-        .groupby("Biker_ID")["TotalOrders"]
-        .sum()
-        .reset_index()
-        .rename(columns={"TotalOrders": "Total_Load"})
-    )
-
-    return final_df.merge(load, on="Biker_ID", how="left")
-
-# --------------------------------------------------
-# ROUTE BUILDER (COMMON)
-# --------------------------------------------------
 def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
-    final_routes = []
+    routes = []
 
     for biker in sorted(df["Biker_ID"].unique()):
         group = df[df["Biker_ID"] == biker].to_dict("records")
 
         pickup = {
+            "Warehouse": pickup_name,
             "Biker_ID": biker,
             "Pincode": pickup_name,
             "Latitude": pickup_lat,
@@ -155,7 +44,7 @@ def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
         while group:
             nearest = min(
                 group,
-                key=lambda x: get_distance(
+                key=lambda x: distance(
                     current["Latitude"], current["Longitude"],
                     x["Latitude"], x["Longitude"]
                 )
@@ -167,63 +56,169 @@ def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
         for seq, stop in enumerate(route, start=1):
             stop["Sequence"] = seq
             stop["Plan_Type"] = plan_type
-            final_routes.append(stop)
+            routes.append(stop)
 
-    return pd.DataFrame(final_routes)
+    return pd.DataFrame(routes)
+
+# --------------------------------------------------
+# PLAN A – IDEAL CAPACITY
+# --------------------------------------------------
+def plan_a(df, capacity, pickup_lat, pickup_lon, pickup_name):
+    assigned = []
+    biker = 1
+    load = 0
+
+    for _, r in df.iterrows():
+        if load + r["TotalOrders"] > capacity:
+            biker += 1
+            load = 0
+
+        assigned.append({
+            "Warehouse": pickup_name,
+            "Biker_ID": biker,
+            "Pincode": r["Pincode"],
+            "Latitude": r["Latitude"],
+            "Longitude": r["Longitude"],
+            "TotalOrders": r["TotalOrders"]
+        })
+        load += r["TotalOrders"]
+
+    return build_routes(
+        pd.DataFrame(assigned),
+        pickup_lat, pickup_lon, pickup_name,
+        "Ideal Capacity Based"
+    )
+
+# --------------------------------------------------
+# PLAN B – RIDER CONSTRAINED
+# --------------------------------------------------
+def plan_b(df, riders, pickup_lat, pickup_lon, pickup_name):
+    assigned = []
+    cycle = list(range(1, riders + 1))
+    idx = 0
+
+    for _, r in df.iterrows():
+        assigned.append({
+            "Warehouse": pickup_name,
+            "Biker_ID": cycle[idx],
+            "Pincode": r["Pincode"],
+            "Latitude": r["Latitude"],
+            "Longitude": r["Longitude"],
+            "TotalOrders": r["TotalOrders"]
+        })
+        idx = (idx + 1) % riders
+
+    result = build_routes(
+        pd.DataFrame(assigned),
+        pickup_lat, pickup_lon, pickup_name,
+        "Rider Constrained"
+    )
+
+    load = (
+        result[result["TotalOrders"] > 0]
+        .groupby("Biker_ID")["TotalOrders"]
+        .sum()
+        .reset_index()
+        .rename(columns={"TotalOrders": "Total_Load"})
+    )
+
+    return result.merge(load, on="Biker_ID", how="left")
 
 # --------------------------------------------------
 # STREAMLIT UI
 # --------------------------------------------------
-st.title("🚴 Logistics Route Optimization – Dual Plan")
+st.title("🚚 Multi-Warehouse Route Optimization")
 
-uploaded_file = st.file_uploader("Upload Order Excel", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload Orders Excel", type=["xlsx"])
 
-st.subheader("Pickup Location")
-pickup_name = st.text_input("Pickup Name", "CHENNAI_WH")
-pickup_lat = st.number_input("Latitude", value=13.0827, format="%.6f")
-pickup_lon = st.number_input("Longitude", value=80.2707, format="%.6f")
+st.subheader("Warehouse 1 (Mandatory)")
+wh1_name = st.text_input("WH1 Name", "WH_CHENNAI")
+wh1_lat = st.number_input("WH1 Latitude", value=13.0827, format="%.6f")
+wh1_lon = st.number_input("WH1 Longitude", value=80.2707, format="%.6f")
+
+st.subheader("Warehouse 2 (Optional)")
+enable_wh2 = st.checkbox("Enable Warehouse 2")
+
+if enable_wh2:
+    wh2_name = st.text_input("WH2 Name", "WH_2")
+    wh2_lat = st.number_input("WH2 Latitude", value=12.9716, format="%.6f")
+    wh2_lon = st.number_input("WH2 Longitude", value=77.5946, format="%.6f")
 
 st.subheader("Rider Inputs")
-available_bikers = st.number_input("Available Riders", 1, 100, 5)
-capacity_per_biker = st.number_input("Max Orders per Rider", 1, 50, 10)
+available_riders = st.number_input("Available Riders", 1, 100, 5)
+capacity_per_rider = st.number_input("Max Orders per Rider", 1, 50, 10)
 
-if st.button("Generate Both Plans"):
+# --------------------------------------------------
+# RUN
+# --------------------------------------------------
+if st.button("Generate Plans"):
     if uploaded_file is None:
-        st.warning("Please upload an Excel file")
+        st.warning("Upload file first")
     else:
-        plan_a_df = plan_a_capacity_based(
-            uploaded_file,
-            capacity_per_biker,
-            pickup_lat,
-            pickup_lon,
-            pickup_name
+        df = pd.read_excel(uploaded_file)
+
+        base = (
+            df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
+            .sum()
+            .reset_index()
+            .rename(columns={"Orders": "TotalOrders"})
         )
 
-        plan_b_df = plan_b_rider_constrained(
-            uploaded_file,
-            available_bikers,
-            pickup_lat,
-            pickup_lon,
-            pickup_name
-        )
+        # Cluster by proximity
+        if enable_wh2:
+            base["Dist_WH1"] = base.apply(
+                lambda x: distance(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
+            )
+            base["Dist_WH2"] = base.apply(
+                lambda x: distance(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
+            )
+            wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]]
+            wh2_df = base[base["Dist_WH1"] > base["Dist_WH2"]]
+        else:
+            wh1_df = base
+            wh2_df = pd.DataFrame()
 
-        st.subheader("📊 Plan A – Ideal Capacity Based")
-        st.dataframe(plan_a_df)
+        # GLOBAL PLANS
+        global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
+        global_b = plan_b(base, available_riders, wh1_lat, wh1_lon, "GLOBAL")
+
+        # WH1 PLANS
+        wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, wh1_name)
+        wh1_b = plan_b(wh1_df, available_riders, wh1_lat, wh1_lon, wh1_name)
 
         st.download_button(
-            "⬇ Download Plan A CSV",
-            plan_a_df.to_csv(index=False).encode("utf-8"),
-            "Plan_A_Ideal_Capacity_Based.csv",
-            "text/csv"
+            "⬇ Global Plan A",
+            global_a.to_csv(index=False),
+            "Plan_A_Ideal_Capacity_Based.csv"
         )
-
-        st.subheader("📊 Plan B – Rider Constrained")
-        st.dataframe(plan_b_df)
-
         st.download_button(
-            "⬇ Download Plan B CSV",
-            plan_b_df.to_csv(index=False).encode("utf-8"),
-            "Plan_B_Riders_Constrained.csv",
-            "text/csv"
+            "⬇ Global Plan B",
+            global_b.to_csv(index=False),
+            "Plan_B_Riders_Constrained.csv"
         )
+        st.download_button(
+            "⬇ WH1 Plan A",
+            wh1_a.to_csv(index=False),
+            "WH1_Plan_A_Ideal_Capacity.csv"
+        )
+        st.download_button(
+            "⬇ WH1 Plan B",
+            wh1_b.to_csv(index=False),
+            "WH1_Plan_B_Rider_Constrained.csv"
+        )
+
+        if enable_wh2 and not wh2_df.empty:
+            wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, wh2_name)
+            wh2_b = plan_b(wh2_df, available_riders, wh2_lat, wh2_lon, wh2_name)
+
+            st.download_button(
+                "⬇ WH2 Plan A",
+                wh2_a.to_csv(index=False),
+                "WH2_Plan_A_Ideal_Capacity.csv"
+            )
+            st.download_button(
+                "⬇ WH2 Plan B",
+                wh2_b.to_csv(index=False),
+                "WH2_Plan_B_Rider_Constrained.csv"
+            )
 
