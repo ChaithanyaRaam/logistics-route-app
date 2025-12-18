@@ -13,7 +13,6 @@ import numpy as np
 import math
 import io
 import folium
-from weasyprint import HTML
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -30,11 +29,10 @@ def get_distance(lat1, lon1, lat2, lon2):
     return np.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
 
 # --------------------------------------------------
-# CORE LOGIC
+# PLAN A – IDEAL CAPACITY BASED
 # --------------------------------------------------
-def process_logistics(
+def plan_a_capacity_based(
     uploaded_file,
-    available_bikers,
     capacity_per_biker,
     pickup_lat,
     pickup_lon,
@@ -42,23 +40,15 @@ def process_logistics(
 ):
     df = pd.read_excel(uploaded_file)
 
-    required_cols = {"Pincode", "Latitude", "Longitude", "Orders"}
-    if not required_cols.issubset(df.columns):
-        st.error(f"Excel must contain columns: {required_cols}")
-        return pd.DataFrame()
-
-    # Aggregate unique stops
     stops = (
         df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
         .sum()
         .reset_index()
         .rename(columns={"Orders": "TotalOrders"})
+        .sort_values("Pincode")
+        .reset_index(drop=True)
     )
 
-    stops["Area_Name"] = stops["Pincode"].astype(str)
-    stops = stops.sort_values("Pincode").reset_index(drop=True)
-
-    # Assign bikers
     assigned = []
     biker_id = 1
     used_capacity = 0
@@ -71,7 +61,6 @@ def process_logistics(
         assigned.append({
             "Biker_ID": biker_id,
             "Pincode": r["Pincode"],
-            "Area_Name": r["Area_Name"],
             "Latitude": r["Latitude"],
             "Longitude": r["Longitude"],
             "TotalOrders": r["TotalOrders"]
@@ -80,16 +69,81 @@ def process_logistics(
 
     assigned_df = pd.DataFrame(assigned)
 
-    # Route optimization
+    return build_routes(
+        assigned_df,
+        pickup_lat,
+        pickup_lon,
+        pickup_name,
+        plan_type="Ideal Capacity Based"
+    )
+
+# --------------------------------------------------
+# PLAN B – RIDER CONSTRAINED
+# --------------------------------------------------
+def plan_b_rider_constrained(
+    uploaded_file,
+    available_bikers,
+    pickup_lat,
+    pickup_lon,
+    pickup_name
+):
+    df = pd.read_excel(uploaded_file)
+
+    stops = (
+        df.groupby(["Pincode", "Latitude", "Longitude"])["Orders"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Orders": "TotalOrders"})
+        .sort_values("Pincode")
+        .reset_index(drop=True)
+    )
+
+    assigned = []
+    rider_cycle = list(range(1, available_bikers + 1))
+    idx = 0
+
+    for _, r in stops.iterrows():
+        assigned.append({
+            "Biker_ID": rider_cycle[idx],
+            "Pincode": r["Pincode"],
+            "Latitude": r["Latitude"],
+            "Longitude": r["Longitude"],
+            "TotalOrders": r["TotalOrders"]
+        })
+        idx = (idx + 1) % available_bikers
+
+    assigned_df = pd.DataFrame(assigned)
+
+    final_df = build_routes(
+        assigned_df,
+        pickup_lat,
+        pickup_lon,
+        pickup_name,
+        plan_type="Rider Constrained"
+    )
+
+    load = (
+        final_df[final_df["TotalOrders"] > 0]
+        .groupby("Biker_ID")["TotalOrders"]
+        .sum()
+        .reset_index()
+        .rename(columns={"TotalOrders": "Total_Load"})
+    )
+
+    return final_df.merge(load, on="Biker_ID", how="left")
+
+# --------------------------------------------------
+# ROUTE BUILDER (COMMON)
+# --------------------------------------------------
+def build_routes(df, pickup_lat, pickup_lon, pickup_name, plan_type):
     final_routes = []
 
-    for biker in assigned_df["Biker_ID"].unique():
-        group = assigned_df[assigned_df["Biker_ID"] == biker].to_dict("records")
+    for biker in sorted(df["Biker_ID"].unique()):
+        group = df[df["Biker_ID"] == biker].to_dict("records")
 
         pickup = {
             "Biker_ID": biker,
             "Pincode": pickup_name,
-            "Area_Name": "Pickup Location",
             "Latitude": pickup_lat,
             "Longitude": pickup_lon,
             "TotalOrders": 0
@@ -112,118 +166,15 @@ def process_logistics(
 
         for seq, stop in enumerate(route, start=1):
             stop["Sequence"] = seq
+            stop["Plan_Type"] = plan_type
             final_routes.append(stop)
 
-    final_df = pd.DataFrame(final_routes)
-
-    # Summary
-    total_orders = stops["TotalOrders"].sum()
-    riders_required = math.ceil(total_orders / capacity_per_biker)
-
-    st.markdown("### 📊 Delivery Summary")
-    st.write(f"**Total Orders:** {total_orders}")
-    st.write(f"**Capacity / Rider:** {capacity_per_biker}")
-    st.write(f"**Riders Required:** {riders_required}")
-    st.write(f"**Riders Available:** {available_bikers}")
-
-    if riders_required > available_bikers:
-        st.warning(f"⚠️ Short by {riders_required - available_bikers} riders")
-    else:
-        st.success("✅ Rider capacity sufficient")
-
-    return final_df
-
-# --------------------------------------------------
-# MAP (STREAMLIT ONLY)
-# --------------------------------------------------
-def render_biker_map(df):
-    m = folium.Map(
-        location=[df["Latitude"].mean(), df["Longitude"].mean()],
-        zoom_start=12
-    )
-
-    for _, r in df.iterrows():
-        color = "green" if r["TotalOrders"] == 0 else "blue"
-        folium.Marker(
-            [r["Latitude"], r["Longitude"]],
-            popup=f"""
-            <b>{r['Pincode']}</b><br>
-            Orders: {r['TotalOrders']}<br>
-            Seq: {r['Sequence']}
-            """,
-            icon=folium.Icon(color=color)
-        ).add_to(m)
-
-    folium.PolyLine(
-        df[["Latitude", "Longitude"]].values.tolist(),
-        color="red",
-        weight=4
-    ).add_to(m)
-
-    return m
-
-# --------------------------------------------------
-# PDF (NO MAPS – PRINT FRIENDLY)
-# --------------------------------------------------
-def generate_trip_sheet_pdf(final_df):
-    pages = []
-
-    for biker in sorted(final_df["Biker_ID"].unique()):
-        biker_df = final_df[final_df["Biker_ID"] == biker].sort_values("Sequence")
-
-        rows_html = ""
-        for _, r in biker_df.iterrows():
-            rows_html += f"""
-            <tr>
-                <td>{r['Sequence']}</td>
-                <td>{r['Pincode']}</td>
-                <td>{r['Area_Name']}</td>
-                <td>{r['TotalOrders']}</td>
-            </tr>
-            """
-
-        pages.append(f"""
-        <div style="page-break-after: always;">
-            <h2>Biker {biker} – Trip Sheet</h2>
-            <table border="1" cellspacing="0" cellpadding="6" width="100%">
-                <tr>
-                    <th>Seq</th>
-                    <th>Pincode</th>
-                    <th>Area</th>
-                    <th>Orders</th>
-                </tr>
-                {rows_html}
-            </table>
-        </div>
-        """)
-
-    html = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; }}
-            h2 {{ margin-bottom: 10px; }}
-            table {{ border-collapse: collapse; }}
-            th {{ background: #f2f2f2; }}
-        </style>
-    </head>
-    <body>
-        <h1>Daily Biker Trip Sheets</h1>
-        {''.join(pages)}
-    </body>
-    </html>
-    """
-
-    pdf_buffer = io.BytesIO()
-    HTML(string=html).write_pdf(pdf_buffer)
-    pdf_buffer.seek(0)
-
-    return pdf_buffer
+    return pd.DataFrame(final_routes)
 
 # --------------------------------------------------
 # STREAMLIT UI
 # --------------------------------------------------
-st.title("🚴 Logistics Route Optimization")
+st.title("🚴 Logistics Route Optimization – Dual Plan")
 
 uploaded_file = st.file_uploader("Upload Order Excel", type=["xlsx"])
 
@@ -232,48 +183,47 @@ pickup_name = st.text_input("Pickup Name", "CHENNAI_WH")
 pickup_lat = st.number_input("Latitude", value=13.0827, format="%.6f")
 pickup_lon = st.number_input("Longitude", value=80.2707, format="%.6f")
 
-st.subheader("Capacity Settings")
-available_bikers = st.number_input("Available Bikers", 1, 100, 10)
-capacity_per_biker = st.number_input("Orders per Biker", 1, 50, 10)
+st.subheader("Rider Inputs")
+available_bikers = st.number_input("Available Riders", 1, 100, 5)
+capacity_per_biker = st.number_input("Max Orders per Rider", 1, 50, 10)
 
-if st.button("Generate Routes"):
+if st.button("Generate Both Plans"):
     if uploaded_file is None:
         st.warning("Please upload an Excel file")
     else:
-        final_df = process_logistics(
+        plan_a_df = plan_a_capacity_based(
             uploaded_file,
-            available_bikers,
             capacity_per_biker,
             pickup_lat,
             pickup_lon,
             pickup_name
         )
 
-        if not final_df.empty:
-            st.subheader("📋 Trip Sheet (Table)")
-            st.dataframe(final_df)
+        plan_b_df = plan_b_rider_constrained(
+            uploaded_file,
+            available_bikers,
+            pickup_lat,
+            pickup_lon,
+            pickup_name
+        )
 
-            # CSV
-            st.download_button(
-                "⬇ Download CSV",
-                final_df.to_csv(index=False).encode("utf-8"),
-                "biker_trip_sheet.csv",
-                "text/csv"
-            )
+        st.subheader("📊 Plan A – Ideal Capacity Based")
+        st.dataframe(plan_a_df)
 
-            # MAPS (UI only)
-            st.subheader("🗺 Interactive Route Maps")
-            for biker in sorted(final_df["Biker_ID"].unique()):
-                st.markdown(f"#### Biker {biker}")
-                m = render_biker_map(final_df[final_df["Biker_ID"] == biker])
-                st.components.v1.html(m._repr_html_(), height=500)
+        st.download_button(
+            "⬇ Download Plan A CSV",
+            plan_a_df.to_csv(index=False).encode("utf-8"),
+            "Plan_A_Ideal_Capacity_Based.csv",
+            "text/csv"
+        )
 
-            # PDF
-            pdf_buffer = generate_trip_sheet_pdf(final_df)
-            st.download_button(
-                "⬇ Download Printable Trip Sheet PDF",
-                pdf_buffer,
-                "biker_trip_sheets.pdf",
-                "application/pdf"
-            )
+        st.subheader("📊 Plan B – Rider Constrained")
+        st.dataframe(plan_b_df)
+
+        st.download_button(
+            "⬇ Download Plan B CSV",
+            plan_b_df.to_csv(index=False).encode("utf-8"),
+            "Plan_B_Riders_Constrained.csv",
+            "text/csv"
+        )
 
