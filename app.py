@@ -86,12 +86,13 @@ def parse_kml_local(path):
 # ==================================================
 def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
 
-    if wh_name == WH1_NAME:
+    # Zone priority by warehouse
+    if wh_name == "WH1":
         ZONE_ORDER = [
             "South / OMR / Tambaram",
             "Outer West / Peripheral"
         ]
-    else:
+    else:  # WH2
         ZONE_ORDER = [
             "Velachery / Guindy / Saidapet",
             "Central Chennai",
@@ -104,6 +105,7 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
     for biker_id in sorted(df["Biker_ID"].unique()):
         grp = df[df["Biker_ID"] == biker_id].copy()
 
+        # Compute geo metrics
         grp["Bearing"] = grp.apply(
             lambda x: (math.degrees(
                 bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
@@ -117,17 +119,28 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
         )
 
         ordered_chunks = []
+
         for zone in ZONE_ORDER:
             zdf = grp[grp["Zone"] == zone].copy()
-            if not zdf.empty:
+            if zdf.empty:
+                continue
+
+            # 🔑 KEY FIX:
+            # WH1 → Distance first (closest → far)
+            # WH2 → Bearing first (directional sweep)
+            if wh_name == "WH1":
+                zdf = zdf.sort_values(["Distance", "Bearing"])
+            else:
                 zdf = zdf.sort_values(["Bearing", "Distance"])
-                ordered_chunks.append(zdf)
+
+            ordered_chunks.append(zdf)
 
         if not ordered_chunks:
             continue
 
         final_df = pd.concat(ordered_chunks)
 
+        # Start from warehouse
         seq = 1
         routes.append({
             "Warehouse": wh_name,
@@ -140,15 +153,16 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             "Plan_Type": plan_type
         })
 
+        # Append delivery points
         for _, r in final_df.iterrows():
             seq += 1
             routes.append({
                 "Warehouse": wh_name,
                 "Biker_ID": biker_id,
-                "Pincode": r.Pincode,
-                "Latitude": r.Latitude,
-                "Longitude": r.Longitude,
-                "TotalOrders": r.TotalOrders,
+                "Pincode": r["Pincode"],
+                "Latitude": r["Latitude"],
+                "Longitude": r["Longitude"],
+                "TotalOrders": r["TotalOrders"],
                 "Sequence": seq,
                 "Plan_Type": plan_type
             })
