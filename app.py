@@ -193,48 +193,31 @@ def route_inside_cluster(df, start_lat, start_lon):
     if df.empty: return df
     remaining = df.copy()
 
-    # --- THE KEY FIX ---
-    # Determine if we should sweep East-to-West or West-to-East
-    # For WH2 moving to Western suburbs, we sort Longitude DESCENDING (East to West)
-    remaining = remaining.sort_values(by='Longitude', ascending=False)
+    # 1. Detect if the cluster is spread more North-South or East-West
+    lat_range = remaining['Latitude'].max() - remaining['Latitude'].min()
+    lon_range = remaining['Longitude'].max() - remaining['Longitude'].min()
+
+    # 2. Determine Sweep Direction
+    if lat_range > lon_range:
+        # VERTICAL SWEEP (Best for Biker 1: Velachery -> Anna Nagar)
+        is_forward = remaining['Latitude'].mean() > start_lat
+        remaining = remaining.sort_values(by='Latitude', ascending=is_forward)
+    else:
+        # HORIZONTAL SWEEP (Best for Biker 2: City -> Ambattur)
+        is_forward = remaining['Longitude'].mean() > start_lon
+        remaining = remaining.sort_values(by='Longitude', ascending=is_forward)
 
     route = []
-
-    # 1. Determine general flow direction
-    # If the average Latitude of the cluster is higher than our starting point,
-    # we are moving North.
-    is_northbound = remaining['Latitude'].mean() > start_lat
-
-    # 2. Pre-Sort the entire cluster to create a "Sweep"
-    # This prevents the greedy 'nearest neighbor' from jumping past a pincode
-    # that is 'on the way' just because another one is slightly closer.
-    remaining = remaining.sort_values(
-        by=["Latitude", "Longitude"],
-        ascending=[is_northbound, True]
-    )
-
     clat, clon = start_lat, start_lon
 
     while not remaining.empty:
-        # Standard distance for reference
         remaining['dist'] = remaining.apply(
             lambda r: haversine(clat, clon, r.Latitude, r.Longitude), axis=1
         )
 
-        # 3. Apply a heavy Backtrack Penalty
-        # If moving North, any point behind us (South) gets a 20km penalty.
-        def directional_penalty(row):
-            penalty = 0
-            if is_northbound and row.Latitude < (clat - 0.002):
-                penalty = 20.0
-            elif not is_northbound and row.Latitude > (clat + 0.002):
-                penalty = 20.0
-            return row.dist + penalty
-
-        remaining['adj_dist'] = remaining.apply(directional_penalty, axis=1)
-
-        # Pick the best next stop
-        nxt_idx = remaining['adj_dist'].idxmin()
+        # Pick the next nearest stop from the PRE-SORTED list
+        # This ensures we follow the geographic "ladder"
+        nxt_idx = remaining['dist'].idxmin()
         nxt = remaining.loc[nxt_idx]
 
         route.append(nxt)
