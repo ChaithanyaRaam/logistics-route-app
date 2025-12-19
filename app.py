@@ -233,6 +233,21 @@ def cluster_aware_route(df, start_lat, start_lon, zone_priority):
         zdf = remaining[remaining.Zone == zone].copy()
         if zdf.empty: continue
 
+        # --- UNIVERSAL FLOW FIX ---
+        # Determine the "Target" of the next zone relative to current position
+        # If the zone is mostly North of us, sort ascending (South -> North)
+        # If the zone is mostly South of us, sort descending (North -> South)
+        zone_avg_lat = zdf['Latitude'].mean()
+
+        if zone_avg_lat > clat:
+            # We are moving UP (Northbound)
+            zdf = zdf.sort_values(by="Latitude", ascending=True)
+        else:
+            # We are moving DOWN (Southbound)
+            zdf = zdf.sort_values(by="Latitude", ascending=False)
+        # ---------------------------
+
+        # Now run the nearest neighbor on the pre-sorted 'Sweep'
         routed = route_inside_cluster(zdf, clat, clon)
         final.append(routed)
 
