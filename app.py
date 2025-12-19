@@ -192,6 +192,12 @@ def haversine(lat1, lon1, lat2, lon2):
 def route_inside_cluster(df, start_lat, start_lon):
     if df.empty: return df
     remaining = df.copy()
+
+    # --- THE KEY FIX ---
+    # Determine if we should sweep East-to-West or West-to-East
+    # For WH2 moving to Western suburbs, we sort Longitude DESCENDING (East to West)
+    remaining = remaining.sort_values(by='Longitude', ascending=False)
+
     route = []
 
     # 1. Determine general flow direction
