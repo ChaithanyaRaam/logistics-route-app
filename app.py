@@ -172,45 +172,48 @@ def haversine(lat1, lon1, lat2, lon2):
 # ==================================================
 # SOFT ZONE ROUTING (KEY FIX)
 # ==================================================
-def zone_priority_route(df, start_lat, start_lon, zone_priority, jump_factor=1.4):
+def zone_priority_route(df, start_lat, start_lon, zone_priority):
     remaining = df.copy()
     route = []
     curr_lat, curr_lon = start_lat, start_lon
 
-    for zi, zone in enumerate(zone_priority):
-        while True:
-            same_zone = remaining[remaining.Zone == zone]
-            if same_zone.empty:
-                break
+    for zone in zone_priority:
+        zone_df = remaining[remaining["Zone"] == zone].copy()
+        if zone_df.empty:
+            continue
 
-            same_zone = same_zone.copy()
-            same_zone["Dist"] = same_zone.apply(
-                lambda r: haversine(curr_lat, curr_lon, r.Latitude, r.Longitude),
+        # --------------------------------------------------
+        # STEP 1: choose ENTRY point for the zone (single jump)
+        # --------------------------------------------------
+        zone_df["EntryDist"] = zone_df.apply(
+            lambda x: haversine(curr_lat, curr_lon, x["Latitude"], x["Longitude"]),
+            axis=1
+        )
+        entry = zone_df.sort_values("EntryDist").iloc[0]
+
+        route.append(entry)
+        curr_lat, curr_lon = entry["Latitude"], entry["Longitude"]
+
+        remaining = remaining[remaining["Pincode"] != entry["Pincode"]]
+        zone_df = remaining[remaining["Zone"] == zone].copy()
+
+        # --------------------------------------------------
+        # STEP 2: nearest-neighbour INSIDE the zone only
+        # --------------------------------------------------
+        while not zone_df.empty:
+            zone_df["Dist"] = zone_df.apply(
+                lambda x: haversine(curr_lat, curr_lon, x["Latitude"], x["Longitude"]),
                 axis=1
             )
-            best_same = same_zone.sort_values("Dist").iloc[0]
+            nxt = zone_df.sort_values("Dist").iloc[0]
 
-            best_cross = None
-            if zi + 1 < len(zone_priority):
-                cross = remaining[remaining.Zone == zone_priority[zi + 1]]
-                if not cross.empty:
-                    cross = cross.copy()
-                    cross["Dist"] = cross.apply(
-                        lambda r: haversine(curr_lat, curr_lon, r.Latitude, r.Longitude),
-                        axis=1
-                    )
-                    best_cross = cross.sort_values("Dist").iloc[0]
+            route.append(nxt)
+            curr_lat, curr_lon = nxt["Latitude"], nxt["Longitude"]
 
-            chosen = best_same
-            if best_cross is not None and best_cross.Dist < best_same.Dist / jump_factor:
-                chosen = best_cross
-
-            route.append(chosen)
-            curr_lat, curr_lon = chosen.Latitude, chosen.Longitude
-            remaining = remaining[remaining.Pincode != chosen.Pincode]
+            remaining = remaining[remaining["Pincode"] != nxt["Pincode"]]
+            zone_df = remaining[remaining["Zone"] == zone]
 
     return pd.DataFrame(route)
-
 # ==================================================
 # PLAN B – BIKER ONLY (NO CAPACITY)
 # ==================================================
