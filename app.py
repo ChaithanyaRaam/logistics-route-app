@@ -169,6 +169,22 @@ def haversine(lat1, lon1, lat2, lon2):
     )
     return 2 * R * math.asin(math.sqrt(a))
 
+ # ==================================================
+# Direction
+# ==================================================
+
+def detect_sweep_axis(zone_df):
+    lat_range = zone_df["Latitude"].max() - zone_df["Latitude"].min()
+    lon_range = zone_df["Longitude"].max() - zone_df["Longitude"].min()
+    return "lat" if lat_range >= lon_range else "lon"
+
+
+def is_forward(curr, cand, axis, direction):
+    if axis == "lat":
+        return (cand.Latitude - curr[0]) * direction >= 0
+    else:
+        return (cand.Longitude - curr[1]) * direction >= 0
+
 # ==================================================
 # SOFT ZONE ROUTING (KEY FIX)
 # ==================================================
@@ -178,42 +194,58 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
     curr_lat, curr_lon = start_lat, start_lon
 
     for zone in zone_priority:
-        zone_df = remaining[remaining["Zone"] == zone].copy()
+        zone_df = remaining[remaining.Zone == zone].copy()
         if zone_df.empty:
             continue
 
-        # --------------------------------------------------
-        # STEP 1: choose ENTRY point for the zone (single jump)
-        # --------------------------------------------------
+        # ---- ENTRY POINT (single jump) ----
         zone_df["EntryDist"] = zone_df.apply(
-            lambda x: haversine(curr_lat, curr_lon, x["Latitude"], x["Longitude"]),
+            lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
             axis=1
         )
         entry = zone_df.sort_values("EntryDist").iloc[0]
-
         route.append(entry)
-        curr_lat, curr_lon = entry["Latitude"], entry["Longitude"]
 
-        remaining = remaining[remaining["Pincode"] != entry["Pincode"]]
-        zone_df = remaining[remaining["Zone"] == zone].copy()
+        curr_lat, curr_lon = entry.Latitude, entry.Longitude
+        remaining = remaining[remaining.Pincode != entry.Pincode]
+        zone_df = remaining[remaining.Zone == zone].copy()
 
-        # --------------------------------------------------
-        # STEP 2: nearest-neighbour INSIDE the zone only
-        # --------------------------------------------------
+        if zone_df.empty:
+            continue
+
+        # ---- DETECT SWEEP DIRECTION ----
+        axis = detect_sweep_axis(zone_df)
+        if axis == "lat":
+            direction = 1 if curr_lat <= zone_df["Latitude"].median() else -1
+        else:
+            direction = 1 if curr_lon <= zone_df["Longitude"].median() else -1
+
+        # ---- DIRECTION-AWARE NEAREST NEIGHBOUR ----
         while not zone_df.empty:
             zone_df["Dist"] = zone_df.apply(
-                lambda x: haversine(curr_lat, curr_lon, x["Latitude"], x["Longitude"]),
+                lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
                 axis=1
             )
-            nxt = zone_df.sort_values("Dist").iloc[0]
 
+            forward = zone_df[
+                zone_df.apply(
+                    lambda x: is_forward((curr_lat, curr_lon), x, axis, direction),
+                    axis=1
+                )
+            ]
+
+            # If no forward points exist, allow controlled jump
+            candidates = forward if not forward.empty else zone_df
+
+            nxt = candidates.sort_values("Dist").iloc[0]
             route.append(nxt)
-            curr_lat, curr_lon = nxt["Latitude"], nxt["Longitude"]
 
-            remaining = remaining[remaining["Pincode"] != nxt["Pincode"]]
-            zone_df = remaining[remaining["Zone"] == zone]
+            curr_lat, curr_lon = nxt.Latitude, nxt.Longitude
+            remaining = remaining[remaining.Pincode != nxt.Pincode]
+            zone_df = remaining[remaining.Zone == zone]
 
     return pd.DataFrame(route)
+
 # ==================================================
 # PLAN B – BIKER ONLY (NO CAPACITY)
 # ==================================================
