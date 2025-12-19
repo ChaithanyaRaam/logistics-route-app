@@ -23,10 +23,10 @@ if "plans_generated" not in st.session_state:
 # PAGE CONFIG
 # ==================================================
 st.set_page_config(
-    page_title="Multi-Warehouse Route Optimization (Geo-Logical)",
+    page_title="Zone-Aware Multi-Warehouse Route Optimizer",
     layout="wide"
 )
-st.title("🚚 Multi-Warehouse Route Optimization (Geo-Logical Distance)")
+st.title("🚚 Zone-Aware Multi-Warehouse Route Optimization")
 
 # ==================================================
 # GEO HELPERS
@@ -49,6 +49,28 @@ def bearing(lat1, lon1, lat2, lon2):
         math.radians(lon2 - lon1),
         math.radians(lat2 - lat1)
     )
+
+# ==================================================
+# ZONE LOGIC (CHENNAI-OPTIMIZED)
+# ==================================================
+def assign_zone(lat, lon, wh_lat):
+    """
+    Simple, explainable zoning relative to warehouse latitude.
+    Tuned for Chennai (Saidapet-like centroid).
+    """
+    if lat < wh_lat - 0.03:
+        return "SOUTH_SE"
+    elif lat < wh_lat + 0.02:
+        return "CENTRAL_WEST"
+    else:
+        return "NORTH_WEST"
+
+
+ZONE_ORDER = [
+    "SOUTH_SE",
+    "CENTRAL_WEST",
+    "NORTH_WEST"
+]
 
 # ==================================================
 # KML PARSER (CLOUD SAFE)
@@ -82,7 +104,7 @@ def parse_kml_from_url(kml_url):
     return pd.DataFrame(rows)
 
 # ==================================================
-# ROUTE BUILDERS
+# ROUTE BUILDERS (ZONE AWARE)
 # ==================================================
 def empty_route(plan_type):
     return pd.DataFrame(columns=[
@@ -92,38 +114,19 @@ def empty_route(plan_type):
     ])
 
 
-def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
-    """
-    Zone-aware sweep routing.
-    Eliminates zig-zag and cross-city jumps.
-    """
-
-    def assign_zone(lat, lon):
-        """
-        Chennai-optimized zoning logic.
-        Adjust thresholds if warehouse location changes significantly.
-        """
-        if lon > wh_lon + 0.05 and lat < wh_lat:
-            return "SE"   # OMR / Coastal belt
-        elif lat < wh_lat - 0.03:
-            return "S"    # South
-        elif abs(lat - wh_lat) <= 0.03 and abs(lon - wh_lon) <= 0.03:
-            return "C"    # Central
-        elif lon < wh_lon - 0.04:
-            return "W"    # West
-        elif lat > wh_lat + 0.04 and lon < wh_lon:
-            return "NW"   # North-West (Avadi / Mogappair)
-        else:
-            return "N"    # North / North-East
-
-    ZONE_ORDER = ["SE", "S", "C", "W", "NW", "N"]
-
+def build_geo_routes_zone_aware(df, wh_lat, wh_lon, wh_name, plan_type):
     routes = []
 
     for biker in sorted(df["Biker_ID"].unique()):
         grp = df[df["Biker_ID"] == biker].copy()
 
-        # ---- Compute geo metrics ----
+        # Assign zones
+        grp["Zone"] = grp.apply(
+            lambda x: assign_zone(x.Latitude, x.Longitude, wh_lat),
+            axis=1
+        )
+
+        # Bearing & distance
         grp["Bearing"] = grp.apply(
             lambda x: (math.degrees(
                 bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
@@ -136,34 +139,23 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             axis=1
         )
 
-        grp["Zone"] = grp.apply(
-            lambda x: assign_zone(x.Latitude, x.Longitude),
-            axis=1
-        )
+        ordered = []
 
-        # ---- Zone-wise ordering ----
-        ordered_stops = []
-
+        # Zone-by-zone sweep
         for zone in ZONE_ORDER:
-            zdf = grp[grp["Zone"] == zone].copy()
-            if zdf.empty:
+            zg = grp[grp["Zone"] == zone]
+            if zg.empty:
                 continue
+            zg = zg.sort_values(["Bearing", "Distance"])
+            ordered.append(zg)
 
-            # Sweep within zone
-            zdf = zdf.sort_values(
-                by=["Bearing", "Distance"]
-            )
-
-            ordered_stops.append(zdf)
-
-        if not ordered_stops:
+        if not ordered:
             continue
 
-        final_df = pd.concat(ordered_stops)
+        final_grp = pd.concat(ordered)
 
-        # ---- Build route with sequence ----
+        # Build route
         seq = 1
-
         routes.append({
             "Warehouse": wh_name,
             "Biker_ID": biker,
@@ -175,7 +167,7 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             "Plan_Type": plan_type
         })
 
-        for _, r in final_df.iterrows():
+        for _, r in final_grp.iterrows():
             seq += 1
             routes.append({
                 "Warehouse": wh_name,
@@ -198,23 +190,21 @@ def plan_a(df, capacity, wh_lat, wh_lon, wh_name):
         return empty_route("Plan A")
 
     assigned, biker, load = [], 1, 0
-
     for _, r in df.iterrows():
         if load + r["TotalOrders"] > capacity:
             biker += 1
             load = 0
-
         assigned.append({**r, "Biker_ID": biker})
         load += r["TotalOrders"]
 
-    return build_geo_routes(
+    return build_geo_routes_zone_aware(
         pd.DataFrame(assigned),
         wh_lat, wh_lon, wh_name,
         "Plan A – Capacity Based"
     )
 
 # ==================================================
-# PLAN B – FIXED RIDER CONSTRAINED (SWEEP → PARTITION)
+# PLAN B – RIDER CONSTRAINED (ZONE AWARE)
 # ==================================================
 def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     if df.empty or riders == 0:
@@ -222,29 +212,30 @@ def plan_b(df, riders, wh_lat, wh_lon, wh_name):
 
     df = df.copy()
 
-    # STEP 1: Global angular sweep
+    # Global sweep for rider assignment
     df["Bearing"] = df.apply(
-        lambda x: bearing(wh_lat, wh_lon, x.Latitude, x.Longitude),
+        lambda x: (math.degrees(
+            bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
+        ) + 360) % 360,
         axis=1
     )
+
     df = df.sort_values("Bearing").reset_index(drop=True)
 
-    # STEP 2: Contiguous partition
     chunk_size = math.ceil(len(df) / riders)
     assigned = []
 
     for i in range(riders):
-        chunk = df.iloc[i * chunk_size : (i + 1) * chunk_size]
+        chunk = df.iloc[i * chunk_size:(i + 1) * chunk_size]
         for _, r in chunk.iterrows():
             assigned.append({**r, "Biker_ID": i + 1})
 
     assigned_df = pd.DataFrame(assigned)
 
-    # STEP 3: Distance-ordered route per rider
-    return build_geo_routes(
+    return build_geo_routes_zone_aware(
         assigned_df,
         wh_lat, wh_lon, wh_name,
-        "Plan B – Rider Constrained (Geo-Coherent)"
+        "Plan B – Rider Constrained (Zone Aware)"
     )
 
 # ==================================================
@@ -261,15 +252,9 @@ uploaded_file = st.sidebar.file_uploader(
     type=["csv", "xlsx"]
 )
 
-st.sidebar.header("Warehouse 1")
-wh1_lat = st.sidebar.number_input("WH1 Latitude", value=13.02)
-wh1_lon = st.sidebar.number_input("WH1 Longitude", value=80.22)
-
-enable_wh2 = st.sidebar.checkbox("Enable Warehouse 2", value=False)
-if enable_wh2:
-    st.sidebar.header("Warehouse 2")
-    wh2_lat = st.sidebar.number_input("WH2 Latitude", value=13.08)
-    wh2_lon = st.sidebar.number_input("WH2 Longitude", value=80.28)
+st.sidebar.header("Warehouse")
+wh_lat = st.sidebar.number_input("Warehouse Latitude", value=13.02)
+wh_lon = st.sidebar.number_input("Warehouse Longitude", value=80.22)
 
 st.sidebar.header("Riders")
 capacity_per_rider = st.sidebar.number_input("Capacity per Rider (Plan A)", 1, 50, 10)
@@ -303,77 +288,31 @@ if st.button("Load & Generate Plans"):
 
         base = base[base["TotalOrders"] > 0]
 
-        if enable_wh2:
-            base["D1"] = base.apply(
-                lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
-            )
-            base["D2"] = base.apply(
-                lambda x: haversine(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
-            )
-
-            wh1_df = base[base["D1"] <= base["D2"]]
-            wh2_df = base[base["D1"] > base["D2"]]
-
-            total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
-            wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
-            wh2_riders = total_riders - wh1_riders
-        else:
-            wh1_df = base
-            wh2_df = pd.DataFrame()
-            wh1_riders = total_riders
-            wh2_riders = 0
-
-        # STORE IN SESSION
-        st.session_state.global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
-        st.session_state.global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
-
-        st.session_state.wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, "WH1")
-        st.session_state.wh1_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, "WH1")
-
-        st.session_state.wh2_a = (
-            plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, "WH2")
-            if enable_wh2 else None
-        )
-        st.session_state.wh2_b = (
-            plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, "WH2")
-            if enable_wh2 else None
-        )
+        st.session_state.plan_a = plan_a(base, capacity_per_rider, wh_lat, wh_lon, "WH")
+        st.session_state.plan_b = plan_b(base, total_riders, wh_lat, wh_lon, "WH")
 
         st.session_state.plans_generated = True
-        st.success("Plans generated successfully")
+        st.success("Zone-aware plans generated successfully")
 
     except Exception as e:
         st.error("Error generating plans")
         st.exception(e)
 
 # ==================================================
-# DOWNLOADS (PERSISTENT)
+# DOWNLOADS
 # ==================================================
 if st.session_state.plans_generated:
     st.subheader("⬇ Download Route Plans")
 
-    st.download_button("Plan A – Global",
-        st.session_state.global_a.to_csv(index=False),
-        "Plan_A_Global.csv")
+    st.download_button(
+        "Plan A – Capacity Based",
+        st.session_state.plan_a.to_csv(index=False),
+        "Plan_A_ZoneAware.csv"
+    )
 
-    st.download_button("Plan B – Global",
-        st.session_state.global_b.to_csv(index=False),
-        "Plan_B_Global.csv")
-
-    st.download_button("Plan A – WH1",
-        st.session_state.wh1_a.to_csv(index=False),
-        "WH1_Plan_A.csv")
-
-    st.download_button("Plan B – WH1",
-        st.session_state.wh1_b.to_csv(index=False),
-        "WH1_Plan_B.csv")
-
-    if enable_wh2 and st.session_state.wh2_a is not None:
-        st.download_button("Plan A – WH2",
-            st.session_state.wh2_a.to_csv(index=False),
-            "WH2_Plan_A.csv")
-
-        st.download_button("Plan B – WH2",
-            st.session_state.wh2_b.to_csv(index=False),
-            "WH2_Plan_B.csv")
+    st.download_button(
+        "Plan B – Rider Constrained (Zone Aware)",
+        st.session_state.plan_b.to_csv(index=False),
+        "Plan_B_ZoneAware.csv"
+    )
 
