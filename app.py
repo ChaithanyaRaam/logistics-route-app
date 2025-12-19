@@ -172,10 +172,6 @@ PINCODE_MASTER = {
 }
 
 # ==================================================
-from app_pincode_master import PINCODE_MASTER
-# ⬆️ keep your existing master exactly as is
-
-# ==================================================
 # GEO UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
