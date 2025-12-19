@@ -16,18 +16,18 @@ import xml.etree.ElementTree as ET
 # APP CONFIG
 # ==================================================
 st.set_page_config(
-    page_title="Multi-Warehouse Route Optimizer (Zone Aware)",
+    page_title="Multi-Warehouse Route Optimizer (Stage-Based)",
     layout="wide"
 )
-st.title("🚚 Multi-Warehouse Route Optimization (Zone-Aware, Rider Friendly)")
+st.title("🚚 Multi-Warehouse Route Optimization (Stage-Based, Rider Friendly)")
 
 # ==================================================
 # CONSTANTS
 # ==================================================
 KML_PATH = "data/chennai_pincodes.kml"
 
-WH1_NAME = "WH1"
-WH2_NAME = "WH2"
+WH1_NAME = "WH1"   # Chitlapakkam
+WH2_NAME = "WH2"   # Guindy
 
 # ==================================================
 # GEO HELPERS
@@ -52,7 +52,35 @@ def bearing(lat1, lon1, lat2, lon2):
     )
 
 # ==================================================
-# KML LOADER (LOCAL FILE – BACKEND ONLY)
+# STAGE LOGIC (CORE FIX)
+# ==================================================
+def wh1_stage(distance_km):
+    """
+    WH1 – Chitlapakkam
+    """
+    if distance_km <= 7:
+        return 1   # Inner Tambaram / Pallavaram
+    elif distance_km <= 18:
+        return 2   # OMR belt
+    else:
+        return 3   # Peripheral
+
+
+def wh2_stage(distance_km):
+    """
+    WH2 – Guindy (SIDCO)
+    """
+    if distance_km <= 6:
+        return 1   # Core Guindy / Saidapet / Adyar
+    elif distance_km <= 12:
+        return 2   # Central Chennai
+    elif distance_km <= 20:
+        return 3   # West / Inner West
+    else:
+        return 4   # North Chennai
+
+# ==================================================
+# KML LOADER (LOCAL, BACKEND ONLY)
 # ==================================================
 def parse_kml_local(path):
     with open(path, "rb") as f:
@@ -77,35 +105,20 @@ def parse_kml_local(path):
         })
 
     if not rows:
-        raise RuntimeError("KML loaded but no valid pincodes found")
+        raise RuntimeError("KML loaded but no pincodes found")
 
     return pd.DataFrame(rows)
 
 # ==================================================
-# ZONE-AWARE ROUTING ENGINE
+# ROUTING ENGINE (STAGE → DISTANCE → BEARING)
 # ==================================================
 def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
-
-    # Zone priority by warehouse
-    if wh_name == "WH1":
-        ZONE_ORDER = [
-            "South / OMR / Tambaram",
-            "Outer West / Peripheral"
-        ]
-    else:  # WH2
-        ZONE_ORDER = [
-            "Velachery / Guindy / Saidapet",
-            "Central Chennai",
-            "West / Inner West",
-            "North Chennai"
-        ]
 
     routes = []
 
     for biker_id in sorted(df["Biker_ID"].unique()):
         grp = df[df["Biker_ID"] == biker_id].copy()
 
-        # Compute geo metrics
         grp["Bearing"] = grp.apply(
             lambda x: (math.degrees(
                 bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
@@ -118,29 +131,18 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             axis=1
         )
 
-        ordered_chunks = []
+        # Assign stage
+        if wh_name == WH1_NAME:
+            grp["Stage"] = grp["Distance"].apply(wh1_stage)
+        else:
+            grp["Stage"] = grp["Distance"].apply(wh2_stage)
 
-        for zone in ZONE_ORDER:
-            zdf = grp[grp["Zone"] == zone].copy()
-            if zdf.empty:
-                continue
+        # FINAL SORT RULE (LOCKED)
+        final_df = grp.sort_values(
+            ["Stage", "Distance", "Bearing"]
+        )
 
-            # 🔑 KEY FIX:
-            # WH1 → Distance first (closest → far)
-            # WH2 → Bearing first (directional sweep)
-            if wh_name == "WH1":
-                zdf = zdf.sort_values(["Distance", "Bearing"])
-            else:
-                zdf = zdf.sort_values(["Bearing", "Distance"])
-
-            ordered_chunks.append(zdf)
-
-        if not ordered_chunks:
-            continue
-
-        final_df = pd.concat(ordered_chunks)
-
-        # Start from warehouse
+        # Start at warehouse
         seq = 1
         routes.append({
             "Warehouse": wh_name,
@@ -153,7 +155,6 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             "Plan_Type": plan_type
         })
 
-        # Append delivery points
         for _, r in final_df.iterrows():
             seq += 1
             routes.append({
@@ -239,6 +240,7 @@ uploaded_file = st.sidebar.file_uploader(
 # GENERATE ROUTES
 # ==================================================
 if st.button("Generate Routes"):
+
     if uploaded_file is None:
         st.error("Please upload orders file")
         st.stop()
@@ -267,6 +269,7 @@ if st.button("Generate Routes"):
         st.warning("No orders after merge")
         st.stop()
 
+    # WH split
     if enable_wh2:
         base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1)
         base["D2"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1)
@@ -283,20 +286,18 @@ if st.button("Generate Routes"):
         wh1_riders = total_riders
         wh2_riders = 0
 
-    wh1_plan_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, WH1_NAME)
+    # Generate plans
     wh1_plan_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, WH1_NAME)
-
-    st.subheader("📦 WH1 Routes")
+    st.subheader("📦 WH1 – Rider Routes")
     st.dataframe(wh1_plan_b)
 
     if enable_wh2:
-        wh2_plan_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, WH2_NAME)
         wh2_plan_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, WH2_NAME)
-
-        st.subheader("📦 WH2 Routes")
+        st.subheader("📦 WH2 – Rider Routes")
         st.dataframe(wh2_plan_b)
 
-    st.download_button("Download WH1 – Plan B", wh1_plan_b.to_csv(index=False), "WH1_Plan_B.csv")
+    # Downloads
+    st.download_button("Download WH1 Routes", wh1_plan_b.to_csv(index=False), "WH1_Routes.csv")
     if enable_wh2:
-        st.download_button("Download WH2 – Plan B", wh2_plan_b.to_csv(index=False), "WH2_Plan_B.csv")
+        st.download_button("Download WH2 Routes", wh2_plan_b.to_csv(index=False), "WH2_Routes.csv")
 
