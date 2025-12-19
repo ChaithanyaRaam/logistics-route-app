@@ -15,23 +15,23 @@ import math
 # PAGE CONFIG
 # ==================================================
 st.set_page_config(page_title="SKC Chennai Route Generator", layout="wide")
-st.title("🚚 SKC-Chennai Biker Model Route Generator")
+st.title("SKC-Chennai Biker Model Route Generator")
 
 # ==================================================
-# SESSION STATE (persist outputs)
+# SESSION STATE
 # ==================================================
 for k in ["WH1_A", "WH1_B", "WH2_A", "WH2_B"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
 # ==================================================
-# WAREHOUSE LOCATIONS
+# WAREHOUSES
 # ==================================================
 WH1_LAT, WH1_LON = 12.98, 80.14
 WH2_LAT, WH2_LON = 13.02, 80.15
 
 # ==================================================
-# ZONES & PRIORITY
+# ZONES
 # ==================================================
 WH1_ZONES = {"South / OMR / Tambaram", "Outer West / Peripheral"}
 WH2_ZONES = {
@@ -54,8 +54,7 @@ WH2_ZONE_PRIORITY = [
 ]
 
 # ==================================================
-# PINCODE MASTER (FULL LIST – NOT TRUNCATED)
-# ==================================================
+# PINCODE MASTER (UNCHANGED)
 PINCODE_MASTER = {
     "600004": (13.03822395, 80.27128091, "Central Chennai"),
     "600018": (13.03968161, 80.25069833, "Central Chennai"),
@@ -166,8 +165,12 @@ def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * \
-        math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    a = (
+        math.sin(dlat / 2) ** 2 +
+        math.cos(math.radians(lat1)) *
+        math.cos(math.radians(lat2)) *
+        math.sin(dlon / 2) ** 2
+    )
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
@@ -182,7 +185,10 @@ def zone_priority_route(df, lat, lon, zone_priority):
         zdf = remaining[remaining.Zone == zone]
         while not zdf.empty:
             zdf = zdf.assign(
-                Dist=zdf.apply(lambda r: haversine(clat, clon, r.Latitude, r.Longitude), axis=1)
+                Dist=zdf.apply(
+                    lambda r: haversine(clat, clon, r.Latitude, r.Longitude),
+                    axis=1
+                )
             )
             nxt = zdf.sort_values("Dist").iloc[0]
             route.append(nxt)
@@ -193,60 +199,110 @@ def zone_priority_route(df, lat, lon, zone_priority):
     return pd.DataFrame(route)
 
 # ==================================================
-# PLAN B (BIKER ONLY)
+# PLAN B — BIKER ONLY (FIXED)
 # ==================================================
 def plan_b(df, lat, lon, wh, bikers, zone_priority):
     ordered = zone_priority_route(df, lat, lon, zone_priority)
-    expanded = ordered.loc[ordered.index.repeat(ordered.Orders)].reset_index(drop=True)
+
+    expanded = ordered.loc[
+        ordered.index.repeat(ordered.Orders)
+    ].reset_index(drop=True)
+
     per = math.ceil(len(expanded) / bikers)
-    expanded["Biker_ID"] = (expanded.index // per + 1).clip(upper=bikers)
+
+    expanded["Biker_ID"] = (
+        (expanded.index.to_series() // per) + 1
+    ).clip(upper=bikers)
+
     return expanded.assign(Warehouse=wh)
 
 # ==================================================
-# PLAN A (CAPACITY)
+# PLAN A — CAPACITY (MIN ONLY FOR REPORTING)
 # ==================================================
 def plan_a(df, lat, lon, wh, max_cap, zone_priority):
     ordered = zone_priority_route(df, lat, lon, zone_priority)
     out, biker, load = [], 1, 0
+
     for _, r in ordered.iterrows():
         if load + r.Orders > max_cap:
             biker += 1
             load = 0
         out.append({**r, "Biker_ID": biker, "Warehouse": wh})
         load += r.Orders
+
     return pd.DataFrame(out)
 
 # ==================================================
-# UI INPUTS
+# SIDEBAR INPUTS (FIXED)
 # ==================================================
 st.sidebar.header("Capacity & Riders")
-max_cap = st.sidebar.number_input("Maximum orders per biker", 1, 200, 15)
-total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
-uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)", ["csv", "xlsx"])
+
+min_cap = st.sidebar.number_input(
+    "Minimum orders per biker",
+    min_value=1,
+    max_value=200,
+    value=10
+)
+
+max_cap = st.sidebar.number_input(
+    "Maximum orders per biker",
+    min_value=1,
+    max_value=200,
+    value=15
+)
+
+total_bikers = st.sidebar.number_input(
+    "Total bikers (WH1 + WH2)",
+    min_value=1,
+    max_value=200,
+    value=5
+)
+
+uploaded = st.sidebar.file_uploader(
+    "Upload Orders (Pincode, Orders)",
+    ["csv", "xlsx"]
+)
 
 # ==================================================
 # RUN
 # ==================================================
 if st.button("Generate Routes") and uploaded:
-    orders = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+    orders = (
+        pd.read_csv(uploaded)
+        if uploaded.name.endswith(".csv")
+        else pd.read_excel(uploaded)
+    )
+
     orders["Pincode"] = orders["Pincode"].astype(str)
     orders["Orders"] = orders["Orders"].astype(int)
     orders = orders.groupby("Pincode", as_index=False).Orders.sum()
 
-    master = pd.DataFrame(
-        [{"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
-         for k, v in PINCODE_MASTER.items()]
-    )
+    master = pd.DataFrame([
+        {"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
+        for k, v in PINCODE_MASTER.items()
+    ])
 
     base = orders.merge(master, on="Pincode", how="inner")
 
     wh1 = base[base.Zone.isin(WH1_ZONES)]
     wh2 = base[base.Zone.isin(WH2_ZONES)]
 
-    st.session_state.WH1_A = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", max_cap, WH1_ZONE_PRIORITY)
-    st.session_state.WH2_A = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", max_cap, WH2_ZONE_PRIORITY)
-    st.session_state.WH1_B = plan_b(wh1, WH1_LAT, WH1_LON, "WH1", max(1, total_bikers // 2), WH1_ZONE_PRIORITY)
-    st.session_state.WH2_B = plan_b(wh2, WH2_LAT, WH2_LON, "WH2", max(1, total_bikers // 2), WH2_ZONE_PRIORITY)
+    st.session_state.WH1_A = plan_a(
+        wh1, WH1_LAT, WH1_LON, "WH1", max_cap, WH1_ZONE_PRIORITY
+    )
+    st.session_state.WH2_A = plan_a(
+        wh2, WH2_LAT, WH2_LON, "WH2", max_cap, WH2_ZONE_PRIORITY
+    )
+
+    wh1_bikers = max(1, total_bikers // 2)
+    wh2_bikers = max(1, total_bikers - wh1_bikers)
+
+    st.session_state.WH1_B = plan_b(
+        wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY
+    )
+    st.session_state.WH2_B = plan_b(
+        wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY
+    )
 
     st.success("Routes generated successfully")
 
@@ -254,6 +310,7 @@ if st.button("Generate Routes") and uploaded:
 # DOWNLOADS
 # ==================================================
 st.subheader("⬇ Downloads")
+
 if st.session_state.WH1_A is not None:
     st.download_button("WH1 Plan A", st.session_state.WH1_A.to_csv(index=False), "WH1_Plan_A.csv")
     st.download_button("WH1 Plan B", st.session_state.WH1_B.to_csv(index=False), "WH1_Plan_B.csv")
@@ -266,15 +323,17 @@ if st.session_state.WH1_A is not None:
 if st.session_state.WH1_A is not None:
     st.subheader("📊 Warehouse Summary")
 
-    for label, df in [("WH1", st.session_state.WH1_A), ("WH2", st.session_state.WH2_A)]:
-        if df is not None and not df.empty:
-            grp = df.groupby("Biker_ID")["Orders"].sum()
-            st.markdown(f"**{label}**")
-            st.dataframe(pd.DataFrame([{
-                "Total Orders": int(grp.sum()),
-                "Bikers Used": int(grp.count()),
-                "Avg Orders / Biker": round(grp.mean(), 1),
-                "Max Orders / Biker": int(grp.max()),
-                "Min Orders / Biker": int(grp.min())
-            }]))
+    for label, df in [("WH1", st.session_state.WH1_A),
+                      ("WH2", st.session_state.WH2_A)]:
+        grp = df.groupby("Biker_ID")["Orders"].sum()
+        st.markdown(f"**{label}**")
+        st.dataframe(pd.DataFrame([{
+            "Total Orders": int(grp.sum()),
+            "Bikers Used": int(grp.count()),
+            "Avg Orders / Biker": round(grp.mean(), 1),
+            "Max Orders / Biker": int(grp.max()),
+            "Min Orders / Biker": int(grp.min()),
+            "Configured Min Cap": min_cap,
+            "Configured Max Cap": max_cap
+        }]))
 
