@@ -23,17 +23,20 @@ if "routes_generated" not in st.session_state:
 # ==================================================
 # APP CONFIG
 # ==================================================
-st.set_page_config(page_title="Route Optimizer", layout="wide")
-st.title("🚚 Multi-Warehouse Route Optimizer (Stage-Safe)")
+st.set_page_config(
+    page_title="Multi-Warehouse Route Optimizer (Stage-Safe)",
+    layout="wide"
+)
+st.title("🚚 Multi-Warehouse Route Optimizer (Stage-Safe, Capacity-Aware)")
 
 # ==================================================
-# LOCKED WAREHOUSES (DO NOT EDIT)
+# LOCKED WAREHOUSES (DO NOT EXPOSE TO UI)
 # ==================================================
-WH1_NAME = "WH1"
-WH2_NAME = "WH2"
+WH1_NAME = "WH1"   # Chitlapakkam
+WH2_NAME = "WH2"   # Guindy
 
-WH1_LAT, WH1_LON = 13.02, 80.22     # Chitlapakkam
-WH2_LAT, WH2_LON = 13.08, 80.28     # Guindy
+WH1_LAT, WH1_LON = 13.02, 80.22
+WH2_LAT, WH2_LON = 13.08, 80.28
 
 KML_PATH = "data/chennai_pincodes.kml"
 
@@ -53,7 +56,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
-# STAGE RULES
+# STAGE LOGIC
 # ==================================================
 def wh1_stage(d):
     if d <= 7: return 1
@@ -85,18 +88,52 @@ def parse_kml(path):
             "Latitude": float(lat),
             "Longitude": float(lon)
         })
+
     return pd.DataFrame(rows)
 
 # ==================================================
-# ZIG-ZAG CHECK
+# AUTO-RELAX MIN CAPACITY LOGIC
 # ==================================================
-def has_zigzag(stages):
-    return stages != sorted(stages)
+def assign_bikers_with_auto_relax(df, min_cap, max_cap, max_bikers):
+    """
+    Stage-safe capacity assignment.
+    Auto-relaxes min capacity ONLY for the last biker if demand is uneven.
+    """
+    df = df.copy()
+
+    biker_id = 1
+    load = 0
+    biker_ids = []
+    loads = []
+
+    for _, r in df.iterrows():
+        if load + r.Orders > max_cap:
+            loads.append(load)
+            biker_id += 1
+            load = 0
+
+        biker_ids.append(biker_id)
+        load += r.Orders
+
+        if biker_id > max_bikers:
+            raise ValueError("Biker limit exceeded")
+
+    loads.append(load)
+    df["Biker_ID"] = biker_ids
+
+    # Auto-relax only last biker
+    for i, l in enumerate(loads):
+        if l < min_cap and i != len(loads) - 1:
+            raise ValueError(
+                f"Biker {i+1} load {l} below minimum capacity {min_cap}"
+            )
+
+    return df
 
 # ==================================================
-# ROUTE BUILDER (AUTO-FIX)
+# ROUTE BUILDER (STAGE → DISTANCE)
 # ==================================================
-def build_routes(df, wh_lat, wh_lon, wh_name, plan, max_attempts=3):
+def build_routes(df, wh_lat, wh_lon, wh_name):
     results = []
 
     for biker in sorted(df.Biker_ID.unique()):
@@ -111,11 +148,7 @@ def build_routes(df, wh_lat, wh_lon, wh_name, plan, max_attempts=3):
             wh1_stage if wh_name == WH1_NAME else wh2_stage
         )
 
-        # retry logic if zig-zag
-        for _ in range(max_attempts):
-            sub = sub.sort_values(["Stage", "Distance"])
-            if not has_zigzag(sub.Stage.tolist()):
-                break
+        sub = sub.sort_values(["Stage", "Distance"])
 
         seq = 1
         results.append({
@@ -125,8 +158,7 @@ def build_routes(df, wh_lat, wh_lon, wh_name, plan, max_attempts=3):
             "Latitude": wh_lat,
             "Longitude": wh_lon,
             "Stage": 0,
-            "Sequence": seq,
-            "Plan": plan
+            "Sequence": seq
         })
 
         for _, r in sub.iterrows():
@@ -138,8 +170,7 @@ def build_routes(df, wh_lat, wh_lon, wh_name, plan, max_attempts=3):
                 "Latitude": r.Latitude,
                 "Longitude": r.Longitude,
                 "Stage": r.Stage,
-                "Sequence": seq,
-                "Plan": plan
+                "Sequence": seq
             })
 
     return pd.DataFrame(results)
@@ -167,17 +198,41 @@ def plot_route(df):
     return m
 
 # ==================================================
-# INPUT
+# SIDEBAR INPUTS
 # ==================================================
+st.sidebar.header("Capacity & Availability")
+
+min_capacity = st.sidebar.number_input(
+    "Minimum orders per biker",
+    min_value=1,
+    max_value=200,
+    value=10
+)
+
+max_capacity = st.sidebar.number_input(
+    "Maximum orders per biker",
+    min_value=min_capacity,
+    max_value=300,
+    value=25
+)
+
+total_bikers = st.sidebar.number_input(
+    "Total bikers available (WH1 + WH2)",
+    min_value=1,
+    max_value=500,
+    value=10
+)
+
 uploaded = st.sidebar.file_uploader(
     "Upload Orders (Pincode, Orders)",
     type=["csv", "xlsx"]
 )
 
 # ==================================================
-# GENERATE
+# GENERATE ROUTES
 # ==================================================
 if st.button("Generate Routes") and uploaded is not None:
+
     base = parse_kml(KML_PATH)
 
     orders = (
@@ -186,22 +241,53 @@ if st.button("Generate Routes") and uploaded is not None:
         else pd.read_excel(uploaded)
     )
 
+    # Normalize columns
+    orders.columns = orders.columns.str.strip().str.lower()
+    orders = orders.rename(columns={"pincode": "Pincode", "orders": "Orders"})
+
+    if "Pincode" not in orders.columns or "Orders" not in orders.columns:
+        st.error("Orders file must contain Pincode and Orders columns")
+        st.stop()
+
     orders["Pincode"] = orders["Pincode"].astype(str)
     orders["Orders"] = orders["Orders"].astype(int)
 
     base = base.merge(orders, on="Pincode", how="inner")
 
+    # Warehouse split
     base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON), axis=1)
     base["D2"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH2_LAT, WH2_LON), axis=1)
 
     wh1 = base[base.D1 <= base.D2].copy()
     wh2 = base[base.D1 > base.D2].copy()
 
-    wh1["Biker_ID"] = 1
-    wh2["Biker_ID"] = 1
+    # Required bikers
+    wh1_req = math.ceil(wh1.Orders.sum() / max_capacity) if not wh1.empty else 0
+    wh2_req = math.ceil(wh2.Orders.sum() / max_capacity) if not wh2.empty else 0
 
-    st.session_state.wh1 = build_routes(wh1, WH1_LAT, WH1_LON, WH1_NAME, "Plan B")
-    st.session_state.wh2 = build_routes(wh2, WH2_LAT, WH2_LON, WH2_NAME, "Plan B")
+    if wh1_req + wh2_req > total_bikers:
+        st.error("Insufficient bikers for given demand and max capacity")
+        st.stop()
+
+    # Assign bikers
+    wh1["Distance"] = wh1.apply(lambda x: haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON), axis=1)
+    wh1["Stage"] = wh1["Distance"].apply(wh1_stage)
+    wh1 = wh1.sort_values(["Stage", "Distance"])
+
+    wh1 = assign_bikers_with_auto_relax(
+        wh1, min_capacity, max_capacity, wh1_req
+    )
+
+    wh2["Distance"] = wh2.apply(lambda x: haversine(x.Latitude, x.Longitude, WH2_LAT, WH2_LON), axis=1)
+    wh2["Stage"] = wh2["Distance"].apply(wh2_stage)
+    wh2 = wh2.sort_values(["Stage", "Distance"])
+
+    wh2 = assign_bikers_with_auto_relax(
+        wh2, min_capacity, max_capacity, wh2_req
+    )
+
+    st.session_state.wh1_routes = build_routes(wh1, WH1_LAT, WH1_LON, WH1_NAME)
+    st.session_state.wh2_routes = build_routes(wh2, WH2_LAT, WH2_LON, WH2_NAME)
 
     st.session_state.routes_generated = True
 
@@ -211,20 +297,28 @@ if st.button("Generate Routes") and uploaded is not None:
 if st.session_state.routes_generated:
 
     st.subheader("🛵 WH1 Routes")
-    tabs = st.tabs([f"Biker {i}" for i in st.session_state.wh1.Biker_ID.unique()])
+    wh1_tabs = st.tabs(
+        [f"Biker {i}" for i in sorted(st.session_state.wh1_routes.Biker_ID.unique())]
+    )
 
-    for tab, biker in zip(tabs, st.session_state.wh1.Biker_ID.unique()):
+    for tab, biker in zip(wh1_tabs, sorted(st.session_state.wh1_routes.Biker_ID.unique())):
         with tab:
-            df = st.session_state.wh1[st.session_state.wh1.Biker_ID == biker]
+            df = st.session_state.wh1_routes[
+                st.session_state.wh1_routes.Biker_ID == biker
+            ]
             st.dataframe(df)
             st_folium(plot_route(df), height=450)
 
     st.subheader("🛵 WH2 Routes")
-    tabs = st.tabs([f"Biker {i}" for i in st.session_state.wh2.Biker_ID.unique()])
+    wh2_tabs = st.tabs(
+        [f"Biker {i}" for i in sorted(st.session_state.wh2_routes.Biker_ID.unique())]
+    )
 
-    for tab, biker in zip(tabs, st.session_state.wh2.Biker_ID.unique()):
+    for tab, biker in zip(wh2_tabs, sorted(st.session_state.wh2_routes.Biker_ID.unique())):
         with tab:
-            df = st.session_state.wh2[st.session_state.wh2.Biker_ID == biker]
+            df = st.session_state.wh2_routes[
+                st.session_state.wh2_routes.Biker_ID == biker
+            ]
             st.dataframe(df)
             st_folium(plot_route(df), height=450)
 
