@@ -24,13 +24,13 @@ if "routes_generated" not in st.session_state:
 # APP CONFIG
 # ==================================================
 st.set_page_config(
-    page_title="Multi-Warehouse Route Optimizer (Stage-Safe, Capacity-Aware)",
+    page_title="Multi-Warehouse Route Optimizer",
     layout="wide"
 )
 st.title("🚚 Multi-Warehouse Route Optimizer (Stage-Safe, Capacity-Aware)")
 
 # ==================================================
-# LOCKED WAREHOUSE COORDINATES (DO NOT CHANGE)
+# LOCKED WAREHOUSES (DO NOT CHANGE)
 # ==================================================
 WH1_NAME = "WH1"   # Chitlapakkam
 WH2_NAME = "WH2"   # Guindy
@@ -77,7 +77,7 @@ def wh2_stage(d):
         return 4
 
 # ==================================================
-# KML LOADER
+# KML LOADER (SAFE)
 # ==================================================
 def parse_kml(path):
     root = ET.parse(path).getroot()
@@ -100,7 +100,7 @@ def parse_kml(path):
     return pd.DataFrame(rows)
 
 # ==================================================
-# CAPACITY ASSIGNMENT WITH AUTO-RELAX
+# CAPACITY ASSIGNMENT (AUTO-RELAX LAST BIKER)
 # ==================================================
 def assign_bikers_with_auto_relax(df, min_cap, max_cap, max_bikers):
     df = df.copy()
@@ -128,13 +128,13 @@ def assign_bikers_with_auto_relax(df, min_cap, max_cap, max_bikers):
     for i, l in enumerate(loads):
         if l < min_cap and i != len(loads) - 1:
             raise ValueError(
-                f"Biker {i+1} has load {l} < minimum {min_cap}"
+                f"Biker {i+1} load {l} below minimum {min_cap}"
             )
 
     return df
 
 # ==================================================
-# ROUTE BUILDER (STAGE → DISTANCE)
+# ROUTE BUILDER
 # ==================================================
 def build_routes(df, wh_lat, wh_lon, wh_name):
     routes = []
@@ -179,7 +179,7 @@ def build_routes(df, wh_lat, wh_lon, wh_name):
     return pd.DataFrame(routes)
 
 # ==================================================
-# MAP PLOT
+# MAP
 # ==================================================
 def plot_route(df):
     df = df.sort_values("Sequence")
@@ -235,13 +235,18 @@ if st.button("Generate Routes") and uploaded is not None:
 
     base = parse_kml(KML_PATH)
 
+    if base.empty or "Pincode" not in base.columns:
+        st.error("KML failed to load pincodes. Check data/chennai_pincodes.kml")
+        st.stop()
+
+    st.info(f"KML loaded {base['Pincode'].nunique()} pincodes")
+
     orders = (
         pd.read_csv(uploaded)
         if uploaded.name.endswith(".csv")
         else pd.read_excel(uploaded)
     )
 
-    # Normalize columns
     orders.columns = orders.columns.astype(str).str.strip().str.lower()
     orders = orders.rename(columns={
         "pincode": "Pincode",
@@ -249,8 +254,7 @@ if st.button("Generate Routes") and uploaded is not None:
         "zone": "Zone"
     })
 
-    required = {"Pincode", "Orders", "Zone"}
-    if not required.issubset(orders.columns):
+    if not {"Pincode", "Orders", "Zone"}.issubset(orders.columns):
         st.error("Orders file must contain Pincode, Orders, Zone")
         st.stop()
 
@@ -261,6 +265,7 @@ if st.button("Generate Routes") and uploaded is not None:
     orders = orders.groupby(["Pincode", "Zone"], as_index=False)["Orders"].sum()
 
     base = base.merge(orders, on="Pincode", how="inner")
+    st.info(f"Mapped {base['Pincode'].nunique()} order pincodes")
 
     # Warehouse split
     base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON), axis=1)
@@ -292,7 +297,7 @@ if st.button("Generate Routes") and uploaded is not None:
     st.session_state.routes_generated = True
 
 # ==================================================
-# DISPLAY (PER-BIKER TABS)
+# DISPLAY
 # ==================================================
 if st.session_state.routes_generated:
 
