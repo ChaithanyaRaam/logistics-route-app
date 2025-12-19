@@ -233,7 +233,7 @@ def plan_b(df, lat, lon, wh, bikers, zone_priority):
     ordered = directional_nn_route(df, lat, lon, zone_priority).reset_index(drop=True)
 
     per_biker = math.ceil(len(ordered) / bikers)
-    ordered["Biker_ID"] = ((ordered.index // per_biker) + 1).clip(upper=bikers)
+    ordered["Biker_ID"] = ((pd.Series(ordered.index) // per_biker) + 1).clip(upper=bikers).values
 
     return ordered[["Pincode", "Orders", "Zone", "Biker_ID"]].assign(Warehouse=wh)
 
