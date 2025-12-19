@@ -10,23 +10,24 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import math
-import requests
 import xml.etree.ElementTree as ET
 
 # ==================================================
-# SESSION STATE
-# ==================================================
-if "plans_generated" not in st.session_state:
-    st.session_state.plans_generated = False
-
-# ==================================================
-# PAGE CONFIG
+# APP CONFIG
 # ==================================================
 st.set_page_config(
-    page_title="Multi-Warehouse Route Optimization (Zone-Aware)",
+    page_title="Multi-Warehouse Route Optimizer (Zone Aware)",
     layout="wide"
 )
 st.title("🚚 Multi-Warehouse Route Optimization (Zone-Aware, Rider Friendly)")
+
+# ==================================================
+# CONSTANTS
+# ==================================================
+KML_PATH = "data/chennai_pincodes.kml"
+
+WH1_NAME = "WH1"
+WH2_NAME = "WH2"
 
 # ==================================================
 # GEO HELPERS
@@ -51,43 +52,46 @@ def bearing(lat1, lon1, lat2, lon2):
     )
 
 # ==================================================
-# KML PARSER
+# KML LOADER (LOCAL FILE – BACKEND ONLY)
 # ==================================================
-def parse_kml_from_url(kml_url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(kml_url, headers=headers, timeout=30)
-    if r.status_code != 200:
-        raise ValueError("Failed to download KML")
+def parse_kml_local(path):
+    with open(path, "rb") as f:
+        root = ET.fromstring(f.read())
 
-    root = ET.fromstring(r.content)
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
-
     rows = []
+
     for pm in root.findall(".//kml:Placemark", ns):
         name = pm.find("kml:name", ns)
         coord = pm.find(".//kml:coordinates", ns)
+
         if name is None or coord is None:
             continue
+
         lon, lat, *_ = coord.text.strip().split(",")
+
         rows.append({
             "Pincode": str(name.text).strip(),
             "Latitude": float(lat),
             "Longitude": float(lon)
         })
 
+    if not rows:
+        raise RuntimeError("KML loaded but no valid pincodes found")
+
     return pd.DataFrame(rows)
 
 # ==================================================
-# ZONE-AWARE ROUTING (CORE FIX)
+# ZONE-AWARE ROUTING ENGINE
 # ==================================================
 def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
 
-    if wh_name == "WH1":
+    if wh_name == WH1_NAME:
         ZONE_ORDER = [
             "South / OMR / Tambaram",
             "Outer West / Peripheral"
         ]
-    else:  # WH2
+    else:
         ZONE_ORDER = [
             "Velachery / Guindy / Saidapet",
             "Central Chennai",
@@ -97,8 +101,8 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
 
     routes = []
 
-    for biker in sorted(df["Biker_ID"].unique()):
-        grp = df[df["Biker_ID"] == biker].copy()
+    for biker_id in sorted(df["Biker_ID"].unique()):
+        grp = df[df["Biker_ID"] == biker_id].copy()
 
         grp["Bearing"] = grp.apply(
             lambda x: (math.degrees(
@@ -115,10 +119,9 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
         ordered_chunks = []
         for zone in ZONE_ORDER:
             zdf = grp[grp["Zone"] == zone].copy()
-            if zdf.empty:
-                continue
-            zdf = zdf.sort_values(["Bearing", "Distance"])
-            ordered_chunks.append(zdf)
+            if not zdf.empty:
+                zdf = zdf.sort_values(["Bearing", "Distance"])
+                ordered_chunks.append(zdf)
 
         if not ordered_chunks:
             continue
@@ -128,7 +131,7 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
         seq = 1
         routes.append({
             "Warehouse": wh_name,
-            "Biker_ID": biker,
+            "Biker_ID": biker_id,
             "Pincode": wh_name,
             "Latitude": wh_lat,
             "Longitude": wh_lon,
@@ -141,11 +144,11 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             seq += 1
             routes.append({
                 "Warehouse": wh_name,
-                "Biker_ID": biker,
-                "Pincode": r["Pincode"],
-                "Latitude": r["Latitude"],
-                "Longitude": r["Longitude"],
-                "TotalOrders": r["TotalOrders"],
+                "Biker_ID": biker_id,
+                "Pincode": r.Pincode,
+                "Latitude": r.Latitude,
+                "Longitude": r.Longitude,
+                "TotalOrders": r.TotalOrders,
                 "Sequence": seq,
                 "Plan_Type": plan_type
             })
@@ -153,22 +156,27 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
     return pd.DataFrame(routes)
 
 # ==================================================
-# PLANS
+# PLAN A – CAPACITY BASED
 # ==================================================
 def plan_a(df, capacity, wh_lat, wh_lon, wh_name):
-    assigned, biker, load = [], 1, 0
+    assigned = []
+    biker = 1
+    load = 0
+
     for _, r in df.iterrows():
-        if load + r["TotalOrders"] > capacity:
+        if load + r.TotalOrders > capacity:
             biker += 1
             load = 0
         assigned.append({**r, "Biker_ID": biker})
-        load += r["TotalOrders"]
+        load += r.TotalOrders
 
     return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan A – Capacity Based")
 
-
+# ==================================================
+# PLAN B – RIDER COUNT BASED
+# ==================================================
 def plan_b(df, riders, wh_lat, wh_lon, wh_name):
-    if riders == 0:
+    if riders <= 0:
         return pd.DataFrame()
 
     df = df.copy()
@@ -182,30 +190,25 @@ def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     assigned = []
 
     for i in range(riders):
-        sub = df.iloc[i * chunk : (i + 1) * chunk]
+        sub = df.iloc[i * chunk:(i + 1) * chunk]
         for _, r in sub.iterrows():
             assigned.append({**r, "Biker_ID": i + 1})
 
-    return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan B – Rider Constrained")
+    return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan B – Rider Based")
 
 # ==================================================
 # SIDEBAR INPUTS
 # ==================================================
-st.sidebar.header("Service Area")
-KML_URL = st.sidebar.text_input("Service Area KML URL")
+st.sidebar.header("Warehouses")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload Pincode Orders (CSV / Excel)",
-    type=["csv", "xlsx"]
-)
-
-st.sidebar.header("Warehouse 1 – Chitlapakkam")
+st.sidebar.subheader("WH1 – Chitlapakkam")
 wh1_lat = st.sidebar.number_input("WH1 Latitude", value=13.02)
 wh1_lon = st.sidebar.number_input("WH1 Longitude", value=80.22)
 
-enable_wh2 = st.sidebar.checkbox("Enable Warehouse 2", value=True)
+enable_wh2 = st.sidebar.checkbox("Enable WH2", value=True)
+
 if enable_wh2:
-    st.sidebar.header("Warehouse 2 – SIDCO Guindy")
+    st.sidebar.subheader("WH2 – SIDCO Guindy")
     wh2_lat = st.sidebar.number_input("WH2 Latitude", value=13.08)
     wh2_lon = st.sidebar.number_input("WH2 Longitude", value=80.28)
 
@@ -213,29 +216,42 @@ st.sidebar.header("Riders")
 capacity_per_rider = st.sidebar.number_input("Capacity per Rider", 1, 50, 10)
 total_riders = st.sidebar.number_input("Total Riders", 1, 200, 10)
 
-# ==================================================
-# GENERATE
-# ==================================================
-if st.button("Load & Generate Plans"):
-    base = parse_kml_from_url(KML_URL)
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Orders File (Pincode | Orders | Zone)",
+    type=["csv", "xlsx"]
+)
 
-    orders_df = (
+# ==================================================
+# GENERATE ROUTES
+# ==================================================
+if st.button("Generate Routes"):
+    if uploaded_file is None:
+        st.error("Please upload orders file")
+        st.stop()
+
+    # Load KML
+    base = parse_kml_local(KML_PATH)
+
+    # Load orders
+    orders = (
         pd.read_csv(uploaded_file)
         if uploaded_file.name.endswith(".csv")
         else pd.read_excel(uploaded_file)
     )
 
-    orders_df["Pincode"] = orders_df["Pincode"].astype(str)
-    orders_df["Orders"] = pd.to_numeric(orders_df["Orders"], errors="coerce").fillna(0).astype(int)
-    orders_df["Zone"] = orders_df["Zone"].astype(str)
+    orders["Pincode"] = orders["Pincode"].astype(str)
+    orders["Orders"] = pd.to_numeric(orders["Orders"], errors="coerce").fillna(0).astype(int)
+    orders["Zone"] = orders["Zone"].astype(str)
 
-    orders_df = orders_df.groupby(
-        ["Pincode", "Zone"], as_index=False
-    )["Orders"].sum()
+    orders = orders.groupby(["Pincode", "Zone"], as_index=False)["Orders"].sum()
 
-    base = base.merge(orders_df, on="Pincode", how="left")
+    base = base.merge(orders, on="Pincode", how="left")
     base["TotalOrders"] = base["Orders"].fillna(0).astype(int)
     base = base[base["TotalOrders"] > 0]
+
+    if base.empty:
+        st.warning("No orders after merge")
+        st.stop()
 
     if enable_wh2:
         base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1)
@@ -244,8 +260,8 @@ if st.button("Load & Generate Plans"):
         wh1_df = base[base["D1"] <= base["D2"]]
         wh2_df = base[base["D1"] > base["D2"]]
 
-        total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
-        wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
+        total_orders = wh1_df.TotalOrders.sum() + wh2_df.TotalOrders.sum()
+        wh1_riders = max(1, round(total_riders * wh1_df.TotalOrders.sum() / total_orders))
         wh2_riders = total_riders - wh1_riders
     else:
         wh1_df = base
@@ -253,26 +269,20 @@ if st.button("Load & Generate Plans"):
         wh1_riders = total_riders
         wh2_riders = 0
 
-    st.session_state.wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, "WH1")
-    st.session_state.wh1_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, "WH1")
+    wh1_plan_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, WH1_NAME)
+    wh1_plan_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, WH1_NAME)
+
+    st.subheader("📦 WH1 Routes")
+    st.dataframe(wh1_plan_b)
 
     if enable_wh2:
-        st.session_state.wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, "WH2")
-        st.session_state.wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, "WH2")
+        wh2_plan_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, WH2_NAME)
+        wh2_plan_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, WH2_NAME)
 
-    st.session_state.plans_generated = True
-    st.success("Zone-aware rider-friendly plans generated")
+        st.subheader("📦 WH2 Routes")
+        st.dataframe(wh2_plan_b)
 
-# ==================================================
-# DOWNLOADS
-# ==================================================
-if st.session_state.plans_generated:
-    st.subheader("⬇ Download Route Plans")
-
-    st.download_button("WH1 – Plan A", st.session_state.wh1_a.to_csv(index=False), "WH1_Plan_A.csv")
-    st.download_button("WH1 – Plan B", st.session_state.wh1_b.to_csv(index=False), "WH1_Plan_B.csv")
-
+    st.download_button("Download WH1 – Plan B", wh1_plan_b.to_csv(index=False), "WH1_Plan_B.csv")
     if enable_wh2:
-        st.download_button("WH2 – Plan A", st.session_state.wh2_a.to_csv(index=False), "WH2_Plan_A.csv")
-        st.download_button("WH2 – Plan B", st.session_state.wh2_b.to_csv(index=False), "WH2_Plan_B.csv")
+        st.download_button("Download WH2 – Plan B", wh2_plan_b.to_csv(index=False), "WH2_Plan_B.csv")
 
