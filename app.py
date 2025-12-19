@@ -192,32 +192,45 @@ def haversine(lat1, lon1, lat2, lon2):
 def route_inside_cluster(df, start_lat, start_lon):
     if df.empty: return df
     remaining = df.copy()
-
-    # 1. Detect if the cluster is spread more North-South or East-West
-    lat_range = remaining['Latitude'].max() - remaining['Latitude'].min()
-    lon_range = remaining['Longitude'].max() - remaining['Longitude'].min()
-
-    # 2. Determine Sweep Direction
-    if lat_range > lon_range:
-        # VERTICAL SWEEP (Best for Biker 1: Velachery -> Anna Nagar)
-        is_forward = remaining['Latitude'].mean() > start_lat
-        remaining = remaining.sort_values(by='Latitude', ascending=is_forward)
-    else:
-        # HORIZONTAL SWEEP (Best for Biker 2: City -> Ambattur)
-        is_forward = remaining['Longitude'].mean() > start_lon
-        remaining = remaining.sort_values(by='Longitude', ascending=is_forward)
-
     route = []
+
+    # 1. Determine the Sweep Direction
+    # Calculate if the cluster is spread more North-South or East-West
+    lat_span = remaining['Latitude'].max() - remaining['Latitude'].min()
+    lon_span = remaining['Longitude'].max() - remaining['Longitude'].min()
+
+    # 2. Identify the Flow (Vertical or Horizontal)
+    is_vertical = lat_span > lon_span
+    if is_vertical:
+        is_forward = remaining['Latitude'].mean() > start_lat
+    else:
+        is_forward = remaining['Longitude'].mean() > start_lon
+
     clat, clon = start_lat, start_lon
 
     while not remaining.empty:
+        # Calculate raw distance
         remaining['dist'] = remaining.apply(
             lambda r: haversine(clat, clon, r.Latitude, r.Longitude), axis=1
         )
 
-        # Pick the next nearest stop from the PRE-SORTED list
-        # This ensures we follow the geographic "ladder"
-        nxt_idx = remaining['dist'].idxmin()
+        # 3. APPLY THE PENALTY (This is the most important part)
+        def apply_penalty(row):
+            penalty = 0
+            if is_vertical:
+                # If moving North, penalize points that are South of our current position
+                if is_forward and row.Latitude < (clat - 0.002): penalty = 20.0
+                elif not is_forward and row.Latitude > (clat + 0.002): penalty = 20.0
+            else:
+                # If moving West, penalize points that are East of our current position
+                if is_forward and row.Longitude < (clon - 0.002): penalty = 20.0
+                elif not is_forward and row.Longitude > (clon + 0.002): penalty = 20.0
+            return row.dist + penalty
+
+        remaining['adj_dist'] = remaining.apply(apply_penalty, axis=1)
+
+        # Pick the best next point based on penalized distance
+        nxt_idx = remaining['adj_dist'].idxmin()
         nxt = remaining.loc[nxt_idx]
 
         route.append(nxt)
