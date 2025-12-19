@@ -14,10 +14,16 @@ import requests
 import xml.etree.ElementTree as ET
 
 # --------------------------------------------------
+# SESSION STATE INIT
+# --------------------------------------------------
+if "plans_generated" not in st.session_state:
+    st.session_state.plans_generated = False
+
+# --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(
-    page_title="Multi-Warehouse Geo-Logical Route Optimizer",
+    page_title="Multi-Warehouse Route Optimization (Geo-Logical Distance)",
     layout="wide"
 )
 st.title("🚚 Multi-Warehouse Route Optimization (Geo-Logical Distance)")
@@ -50,7 +56,6 @@ def bearing(lat1, lon1, lat2, lon2):
 def parse_kml_from_url(kml_url):
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(kml_url, headers=headers, timeout=30)
-
     if response.status_code != 200:
         raise ValueError("Failed to download KML")
 
@@ -58,16 +63,12 @@ def parse_kml_from_url(kml_url):
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
 
     rows = []
-
     for placemark in root.findall(".//kml:Placemark", ns):
         name = placemark.find("kml:name", ns)
         coord = placemark.find(".//kml:coordinates", ns)
-
         if name is None or coord is None:
             continue
-
         lon, lat, *_ = coord.text.strip().split(",")
-
         rows.append({
             "Pincode": str(name.text).strip(),
             "Latitude": float(lat),
@@ -80,7 +81,7 @@ def parse_kml_from_url(kml_url):
     return pd.DataFrame(rows)
 
 # --------------------------------------------------
-# ROUTING LOGIC
+# ROUTE BUILDERS
 # --------------------------------------------------
 def empty_route(plan_type):
     return pd.DataFrame(columns=[
@@ -102,7 +103,6 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
         group["Distance"] = group.apply(
             lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude), axis=1
         )
-
         group = group.sort_values(["Bearing", "Distance"])
 
         seq = 1
@@ -132,21 +132,23 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
 
     return pd.DataFrame(routes)
 
+# --------------------------------------------------
+# PLAN LOGIC
+# --------------------------------------------------
 def plan_a(df, capacity, wh_lat, wh_lon, wh_name):
     if df.empty:
         return empty_route("Plan A")
 
     assigned, biker, load = [], 1, 0
-
     for _, r in df.iterrows():
         if load + r["TotalOrders"] > capacity:
             biker += 1
             load = 0
-
         assigned.append({**r, "Biker_ID": biker})
         load += r["TotalOrders"]
 
     return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan A")
+
 
 def plan_b(df, riders, wh_lat, wh_lon, wh_name):
     if df.empty or riders == 0:
@@ -154,7 +156,6 @@ def plan_b(df, riders, wh_lat, wh_lon, wh_name):
 
     assigned, idx = [], 0
     rider_ids = list(range(1, riders + 1))
-
     for _, r in df.iterrows():
         assigned.append({**r, "Biker_ID": rider_ids[idx]})
         idx = (idx + 1) % riders
@@ -175,13 +176,22 @@ uploaded_file = st.sidebar.file_uploader(
     type=["csv", "xlsx"]
 )
 
+st.sidebar.header("Warehouse 1")
 wh1_lat = st.sidebar.number_input("WH1 Latitude", value=13.02)
 wh1_lon = st.sidebar.number_input("WH1 Longitude", value=80.22)
+
+enable_wh2 = st.sidebar.checkbox("Enable Warehouse 2", value=False)
+if enable_wh2:
+    st.sidebar.header("Warehouse 2")
+    wh2_lat = st.sidebar.number_input("WH2 Latitude", value=13.08)
+    wh2_lon = st.sidebar.number_input("WH2 Longitude", value=80.28)
+
+st.sidebar.header("Riders")
 capacity_per_rider = st.sidebar.number_input("Capacity per Rider", 1, 50, 10)
 total_riders = st.sidebar.number_input("Total Riders", 1, 200, 10)
 
 # --------------------------------------------------
-# EXECUTION
+# GENERATE BUTTON
 # --------------------------------------------------
 if st.button("Load & Generate Plans"):
     try:
@@ -194,21 +204,11 @@ if st.button("Load & Generate Plans"):
                 if uploaded_file.name.endswith(".csv")
                 else pd.read_excel(uploaded_file)
             )
-
             orders_df["Pincode"] = orders_df["Pincode"].astype(str)
             orders_df["Orders"] = pd.to_numeric(
                 orders_df["Orders"], errors="coerce"
             ).fillna(0).astype(int)
-
             orders_df = orders_df.groupby("Pincode", as_index=False)["Orders"].sum()
-
-            # 🔒 FINAL GUARANTEE
-            base["Pincode"] = base["Pincode"].astype(str)
-            orders_df["Pincode"] = orders_df["Pincode"].astype(str)
-
-            st.write("Base dtype:", base["Pincode"].dtype)
-            st.write("Orders dtype:", orders_df["Pincode"].dtype)
-
             base = base.merge(orders_df, on="Pincode", how="left")
             base["TotalOrders"] = base["Orders"].fillna(0).astype(int)
         else:
@@ -216,15 +216,76 @@ if st.button("Load & Generate Plans"):
 
         base = base[base["TotalOrders"] > 0]
 
-        global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
-        global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
+        if enable_wh2:
+            base["Dist_WH1"] = base.apply(
+                lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1
+            )
+            base["Dist_WH2"] = base.apply(
+                lambda x: haversine(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1
+            )
+            wh1_df = base[base["Dist_WH1"] <= base["Dist_WH2"]]
+            wh2_df = base[base["Dist_WH1"] > base["Dist_WH2"]]
+            total_orders = wh1_df["TotalOrders"].sum() + wh2_df["TotalOrders"].sum()
+            wh1_riders = max(1, round(total_riders * wh1_df["TotalOrders"].sum() / total_orders))
+            wh2_riders = total_riders - wh1_riders
+        else:
+            wh1_df = base
+            wh2_df = pd.DataFrame()
+            wh1_riders = total_riders
+            wh2_riders = 0
 
-        st.download_button("Plan A – Global", global_a.to_csv(index=False), "Plan_A.csv")
-        st.download_button("Plan B – Global", global_b.to_csv(index=False), "Plan_B.csv")
+        st.session_state.global_a = plan_a(base, capacity_per_rider, wh1_lat, wh1_lon, "GLOBAL")
+        st.session_state.global_b = plan_b(base, total_riders, wh1_lat, wh1_lon, "GLOBAL")
+        st.session_state.wh1_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, "WH1")
+        st.session_state.wh1_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, "WH1")
+        st.session_state.wh2_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, "WH2") if enable_wh2 else None
+        st.session_state.wh2_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, "WH2") if enable_wh2 else None
+        st.session_state.summary = pd.DataFrame([
+            {"Warehouse": "WH1", "Orders": wh1_df["TotalOrders"].sum(), "Riders": wh1_riders},
+            {"Warehouse": "WH2", "Orders": wh2_df["TotalOrders"].sum(), "Riders": wh2_riders} if enable_wh2 else {}
+        ])
+        st.session_state.summary["Orders per Rider"] = (
+            st.session_state.summary["Orders"] / st.session_state.summary["Riders"]
+        ).round(2)
 
+        st.session_state.plans_generated = True
         st.success("Plans generated successfully")
 
     except Exception as e:
-        st.error("Application crashed")
+        st.error("Application error")
         st.exception(e)
+
+# --------------------------------------------------
+# DOWNLOADS (PERSISTENT)
+# --------------------------------------------------
+if st.session_state.plans_generated:
+    st.subheader("⬇ Download Route Plans")
+
+    st.download_button("⬇ Plan A – Global",
+        st.session_state.global_a.to_csv(index=False),
+        "Plan_A_Global.csv")
+
+    st.download_button("⬇ Plan B – Global",
+        st.session_state.global_b.to_csv(index=False),
+        "Plan_B_Global.csv")
+
+    st.download_button("⬇ Plan A – WH1",
+        st.session_state.wh1_a.to_csv(index=False),
+        "WH1_Plan_A.csv")
+
+    st.download_button("⬇ Plan B – WH1",
+        st.session_state.wh1_b.to_csv(index=False),
+        "WH1_Plan_B.csv")
+
+    if enable_wh2 and st.session_state.wh2_a is not None:
+        st.download_button("⬇ Plan A – WH2",
+            st.session_state.wh2_a.to_csv(index=False),
+            "WH2_Plan_A.csv")
+
+        st.download_button("⬇ Plan B – WH2",
+            st.session_state.wh2_b.to_csv(index=False),
+            "WH2_Plan_B.csv")
+
+    st.subheader("🚦 Rider Allocation Summary")
+    st.dataframe(st.session_state.summary)
 
