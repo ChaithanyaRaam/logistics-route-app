@@ -20,11 +20,7 @@ st.title("🚚 SKC-Chennai Biker Model Route Generator")
 # ==================================================
 # SESSION STATE (persist outputs)
 # ==================================================
-for k in [
-    "WH1_A", "WH2_A",
-    "WH1_B", "WH2_B",
-    "EXTRA_RIDERS"
-]:
+for k in ["WH1_A","WH2_A","WH1_B","WH2_B","SUMMARY_A","SUMMARY_B"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
@@ -37,16 +33,8 @@ WH2_LAT, WH2_LON = 13.08, 80.28   # Guindy
 # ==================================================
 # ZONE OWNERSHIP
 # ==================================================
-WH1_ZONES = {
-    "South / OMR / Tambaram",
-    "Outer West / Peripheral"
-}
+WH1_ZONES = {"South / OMR / Tambaram","Outer West / Peripheral"}
 
-# WH2 = everything else (fallback)
-
-# ==================================================
-# ZONE PRIORITY (Directional sweep)
-# ==================================================
 WH1_ZONE_PRIORITY = [
     "South / OMR / Tambaram",
     "Outer West / Peripheral"
@@ -60,8 +48,7 @@ WH2_ZONE_PRIORITY = [
 ]
 
 # ==================================================
-# PINCODE MASTER (FULL – unchanged logic)
-# ==================================================
+# PINCODE MASTER (FULL)
 PINCODE_MASTER = {
     "600001": (13.09329602, 80.29234733, "North Chennai"),
     "600002": (13.07587854, 80.27184724, "Central Chennai"),
@@ -185,6 +172,10 @@ PINCODE_MASTER = {
 }
 
 # ==================================================
+from app_pincode_master import PINCODE_MASTER
+# ⬆️ keep your existing master exactly as is
+
+# ==================================================
 # GEO UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
@@ -192,95 +183,124 @@ def haversine(lat1, lon1, lat2, lon2):
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (
-        math.sin(dlat / 2) ** 2 +
+        math.sin(dlat/2)**2 +
         math.cos(math.radians(lat1)) *
         math.cos(math.radians(lat2)) *
-        math.sin(dlon / 2) ** 2
+        math.sin(dlon/2)**2
     )
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
-# DIRECTIONAL + NEAREST-NEIGHBOUR ROUTING
+# ROUTING CORE
 # ==================================================
-def directional_nn_route(df, start_lat, start_lon, zone_priority):
+def route_inside_cluster(df, start_lat, start_lon):
     remaining = df.copy()
     route = []
-    curr_lat, curr_lon = start_lat, start_lon
+    clat, clon = start_lat, start_lon
 
-    for zone in zone_priority:
-        zone_df = remaining[remaining.Zone == zone].copy()
-
-        # Directional sweep (South → North)
-        zone_df = zone_df.sort_values(["Latitude", "Longitude"])
-
-        while not zone_df.empty:
-            zone_df = zone_df.copy()
-            zone_df.loc[:, "Dist"] = zone_df.apply(
-                lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
+    while not remaining.empty:
+        remaining = remaining.assign(
+            dist=remaining.apply(
+                lambda r: haversine(clat, clon, r.Latitude, r.Longitude),
                 axis=1
             )
-            nxt = zone_df.sort_values("Dist").iloc[0]
-            route.append(nxt)
-
-            curr_lat, curr_lon = nxt.Latitude, nxt.Longitude
-            remaining = remaining[remaining.Pincode != nxt.Pincode]
-            zone_df = remaining[remaining.Zone == zone]
+        )
+        nxt = remaining.sort_values("dist").iloc[0]
+        route.append(nxt)
+        clat, clon = nxt.Latitude, nxt.Longitude
+        remaining = remaining[remaining.Pincode != nxt.Pincode]
 
     return pd.DataFrame(route)
 
+def best_exit(cluster_a, cluster_b):
+    best_row, best_dist = None, float("inf")
+    for _, a in cluster_a.iterrows():
+        for _, b in cluster_b.iterrows():
+            d = haversine(a.Latitude, a.Longitude, b.Latitude, b.Longitude)
+            if d < best_dist:
+                best_row, best_dist = a, d
+    return best_row
+
+def cluster_aware_route(df, start_lat, start_lon, zone_priority):
+    remaining = df.copy()
+    final = []
+    clat, clon = start_lat, start_lon
+
+    for i, zone in enumerate(zone_priority):
+        zdf = remaining[remaining.Zone == zone].copy()
+        if zdf.empty:
+            continue
+
+        next_zone = zone_priority[i+1] if i+1 < len(zone_priority) else None
+        exit_row = None
+
+        if next_zone:
+            nzdf = remaining[remaining.Zone == next_zone]
+            if not nzdf.empty:
+                exit_row = best_exit(zdf, nzdf)
+
+        routed = route_inside_cluster(zdf, clat, clon)
+
+        if exit_row is not None:
+            routed = pd.concat([
+                routed[routed.Pincode != exit_row.Pincode],
+                routed[routed.Pincode == exit_row.Pincode]
+            ])
+
+        final.append(routed)
+        last = routed.iloc[-1]
+        clat, clon = last.Latitude, last.Longitude
+        remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
+
+    return pd.concat(final).reset_index(drop=True)
+
 # ==================================================
-# PLAN B — BIKER ONLY (NO CAPACITY)
+# PLAN B — BIKER COUNT ONLY
 # ==================================================
 def plan_b(df, lat, lon, wh, bikers, zone_priority):
-    ordered = directional_nn_route(df, lat, lon, zone_priority).reset_index(drop=True)
+    ordered = cluster_aware_route(df, lat, lon, zone_priority)
+    per = math.ceil(len(ordered) / bikers)
 
-    per_biker = math.ceil(len(ordered) / bikers)
+    ordered["Biker_ID"] = [
+        min(bikers, i // per + 1) for i in range(len(ordered))
+    ]
 
-    ordered["Biker_ID"] = (
-        ((pd.Series(ordered.index) // per_biker) + 1)
-        .clip(upper=bikers)
-        .values
-    )
-
-    return ordered[["Pincode", "Orders", "Zone", "Biker_ID"]].assign(Warehouse=wh)
+    return ordered[["Pincode","Orders","Zone","Biker_ID"]].assign(Warehouse=wh)
 
 # ==================================================
-# PLAN A — CAPACITY AWARE + EXTRA RIDERS
+# PLAN A — CAPACITY + EXTRA RIDERS
 # ==================================================
 def plan_a(df, lat, lon, wh, min_cap, max_cap, zone_priority):
-    ordered = directional_nn_route(df, lat, lon, zone_priority)
-
-    routes = []
-    biker_id = 1
-    load = 0
+    ordered = cluster_aware_route(df, lat, lon, zone_priority)
+    rows, biker, load = [], 1, 0
 
     for _, r in ordered.iterrows():
         if load + r.Orders > max_cap:
-            biker_id += 1
+            biker += 1
             load = 0
-        routes.append({
+        rows.append({
             "Warehouse": wh,
-            "Biker_ID": biker_id,
+            "Biker_ID": biker,
             "Pincode": r.Pincode,
             "Orders": r.Orders,
             "Zone": r.Zone
         })
         load += r.Orders
 
-    result = pd.DataFrame(routes)
-    loads = result.groupby("Biker_ID")["Orders"].sum()
-    extra_riders = int((loads < min_cap).sum())
+    df_out = pd.DataFrame(rows)
+    loads = df_out.groupby("Biker_ID")["Orders"].sum()
+    extra = (loads < min_cap).sum()
 
-    return result, extra_riders
+    return df_out, extra
 
 # ==================================================
 # SIDEBAR
 # ==================================================
 st.sidebar.header("Capacity & Riders")
-min_cap = st.sidebar.number_input("Minimum orders per biker", 1, 100, 10)
-max_cap = st.sidebar.number_input("Maximum orders per biker", 1, 200, 15)
-total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
-uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)", ["csv", "xlsx"])
+min_cap = st.sidebar.number_input("Minimum orders per biker",1,100,10)
+max_cap = st.sidebar.number_input("Maximum orders per biker",1,200,15)
+total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)",1,200,5)
+uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)",["csv","xlsx"])
 
 # ==================================================
 # MAIN LOGIC
@@ -289,19 +309,18 @@ if st.button("Generate Routes") and uploaded:
     orders = pd.read_excel(uploaded) if uploaded.name.endswith("xlsx") else pd.read_csv(uploaded)
     orders["Pincode"] = orders["Pincode"].astype(str).str.strip()
     orders["Orders"] = pd.to_numeric(orders["Orders"], errors="coerce").fillna(0).astype(int)
-    orders = orders.groupby("Pincode", as_index=False)["Orders"].sum()
-
-    st.info(f"📦 Total orders uploaded: {orders.Orders.sum()}")
+    orders = orders.groupby("Pincode",as_index=False)["Orders"].sum()
 
     master = pd.DataFrame([
-        {"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
-        for k, v in PINCODE_MASTER.items()
+        {"Pincode":k,"Latitude":v[0],"Longitude":v[1],"Zone":v[2]}
+        for k,v in PINCODE_MASTER.items()
     ])
 
     base = orders.merge(master, on="Pincode", how="left")
 
-    if base.Zone.isna().any():
-        st.error(f"Unmapped pincodes: {base[base.Zone.isna()].Pincode.tolist()}")
+    missing = base[base.Zone.isna()]
+    if not missing.empty:
+        st.error(f"Unmapped pincodes: {missing.Pincode.tolist()}")
         st.stop()
 
     wh1 = base[base.Zone.isin(WH1_ZONES)]
@@ -313,13 +332,10 @@ if st.button("Generate Routes") and uploaded:
     st.session_state.WH1_B = plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY)
     st.session_state.WH2_B = plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY)
 
-    st.session_state.WH1_A, wh1_extra = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", min_cap, max_cap, WH1_ZONE_PRIORITY)
-    st.session_state.WH2_A, wh2_extra = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", min_cap, max_cap, WH2_ZONE_PRIORITY)
+    st.session_state.WH1_A, ex1 = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", min_cap, max_cap, WH1_ZONE_PRIORITY)
+    st.session_state.WH2_A, ex2 = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", min_cap, max_cap, WH2_ZONE_PRIORITY)
 
-    st.session_state.EXTRA_RIDERS = {
-        "WH1": wh1_extra,
-        "WH2": wh2_extra
-    }
+    st.session_state.SUMMARY_A = {"WH1 Extra Riders":ex1,"WH2 Extra Riders":ex2}
 
     st.success("Routes generated successfully")
 
@@ -338,13 +354,13 @@ if st.session_state.WH1_B is not None:
 # ==================================================
 st.subheader("📊 Warehouse Summary")
 
-def show_summary(df, label):
+def show_summary(df, title):
     grp = df.groupby("Biker_ID")["Orders"].sum()
-    st.markdown(f"**{label}**")
+    st.markdown(f"**{title}**")
     st.dataframe(pd.DataFrame([{
-        "Total Orders": int(grp.sum()),
+        "Total Orders": grp.sum(),
         "Bikers Used": grp.count(),
-        "Avg Orders / Biker": round(grp.mean(), 1),
+        "Avg Orders / Biker": round(grp.mean(),1),
         "Max Orders / Biker": grp.max(),
         "Min Orders / Biker": grp.min()
     }]))
@@ -356,5 +372,5 @@ if st.session_state.WH1_B is not None:
     show_summary(st.session_state.WH2_A, "WH2 – Plan A")
 
     st.markdown("### 🚨 Extra Riders Required (Plan A)")
-    st.json(st.session_state.EXTRA_RIDERS)
+    st.json(st.session_state.SUMMARY_A)
 
