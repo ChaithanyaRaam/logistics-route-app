@@ -14,14 +14,11 @@ import math
 # ==================================================
 # PAGE CONFIG
 # ==================================================
-st.set_page_config(
-    page_title="Multi-Warehouse Route Generator",
-    layout="wide"
-)
+st.set_page_config(page_title="Multi-Warehouse Route Generator", layout="wide")
 st.title("🚚 Multi-Warehouse Route Generator (Zone & Capacity Aware)")
 
 # ==================================================
-# WAREHOUSE COORDINATES
+# WAREHOUSE LOCATIONS
 # ==================================================
 WH1_LAT, WH1_LON = 13.02, 80.22   # Chitlapakkam
 WH2_LAT, WH2_LON = 13.08, 80.28   # Guindy
@@ -36,7 +33,7 @@ WH1_ZONES = {
 
 WH2_ZONES = {
     "North Chennai",
-    "West / Inner West",
+    "West/Inner West",
     "Central Chennai",
     "Velachery / Guindy / Saidapet"
 }
@@ -52,137 +49,104 @@ WH1_ZONE_PRIORITY = [
 WH2_ZONE_PRIORITY = [
     "Central Chennai",
     "Velachery / Guindy / Saidapet",
-    "West / Inner West",
+    "West/Inner West",
     "North Chennai"
 ]
 
 # ==================================================
-# PINCODE → LAT/LON MASTER
+# PINCODE MASTER (LAT, LON, ZONE)
 # ==================================================
-PINCODE_GEO = {
-    "600067": (13.24458812, 80.11956125),
-    "600103": (13.21852413, 80.28708594),
-    "600057": (13.20823684, 80.31938310),
-    "600055": (13.15200630, 80.06539575),
-    "600066": (13.17287844, 80.14430264),
-    "600052": (13.18161067, 80.20075271),
-    "600019": (13.17301760, 80.29978173),
-    "600068": (13.16732425, 80.27486313),
-    "600062": (13.14855215, 80.11554808),
-    "600051": (13.16442935, 80.24274514),
-    "600060": (13.15984107, 80.21285943),
-    "600063": (13.14641833, 80.23279686),
-    "600081": (13.14166580, 80.27579586),
-    "600065": (13.13664436, 80.07599155),
-    "600118": (13.13085292, 80.25301868),
-    "600099": (13.12735674, 80.20347764),
-    "600110": (13.13040427, 80.22737043),
-    "600053": (13.12576836, 80.15617958),
-    "600080": (13.11995567, 80.18563394),
-    "600077": (13.09097107, 80.11778444),
-    "600039": (13.11713793, 80.26141064),
-    "600001": (13.09329602, 80.29234733),
-    "600054": (13.12153238, 80.08974434),
-    "600021": (13.11375956, 80.28122798),
-    "600013": (13.11235222, 80.29319999),
-    "600011": (13.11157220, 80.23642517),
-    "600082": (13.11271678, 80.22637171),
-    "600076": (13.10722147, 80.17469044),
-    "600049": (13.10809330, 80.20458989),
-    "600012": (13.10072145, 80.25438489),
-    "600058": (13.08599979, 80.15314580),
-    "600071": (13.08290114, 80.13468571),
-    "600038": (13.09970732, 80.21607728),
-    "600079": (13.09873687, 80.27444704),
-    "600023": (13.09785468, 80.23194790),
-    "600040": (13.08791959, 80.20340556),
-    "600112": (13.09375497, 80.26446011),
-    "600101": (13.09346695, 80.19369249),
-    "600050": (13.07845424, 80.17154103),
-    "600072": (13.06843045, 80.03952992),
-    "600010": (13.08533821, 80.24161023),
-    "600009": (13.09230677, 80.27978745),
-    "600102": (13.08901357, 80.22177351),
-    "600003": (13.08615536, 80.27541704),
-    "600108": (13.09004952, 80.28378675),
-    "600104": (13.07738623, 80.28344719),
-    "600007": (13.08330279, 80.26371191),
-    "600109": (13.08529100, 80.28188795),
-    "600030": (13.07852208, 80.22433917),
-    "600002": (13.07587854, 80.27184724),
-    "600106": (13.07272018, 80.21201510),
-    "600008": (13.07072237, 80.26052995),
-    "600084": (13.07673890, 80.25536237),
-    "600031": (13.07382434, 80.24273335),
-    "600107": (13.06642121, 80.19938448),
-    "600029": (13.07112435, 80.22768880),
-    "600111": (13.05998516, 80.17606474),
-    "600034": (13.06162757, 80.24200381),
-    "600005": (13.06115582, 80.27910272),
-    "600105": (13.06556481, 80.26477927),
-    "600094": (13.05871690, 80.22123519),
-    "600026": (13.05464910, 80.21153926),
-    "600014": (13.05249900, 80.26461449),
-    "600006": (13.05816598, 80.25277144),
-    "600092": (13.05479426, 80.19262737),
-    "600116": (13.03950621, 80.14712513),
-    "600024": (13.05095814, 80.22570484),
-    "600093": (13.04982278, 80.19958382),
-    "600056": (13.03248812, 80.10160032),
-    "600087": (13.04286066, 80.17383656),
-    "600017": (13.04185857, 80.23566124),
-    "600004": (13.03822395, 80.27128091),
-    "600018": (13.03968161, 80.25069833),
-    "600033": (13.03665727, 80.22349452),
-    "600078": (13.03888524, 80.19703562),
-    "600083": (13.03479859, 80.21221648),
-    "600089": (13.03111379, 80.17885348),
-    "600035": (13.02985737, 80.23679016),
-    "600097": (13.02105769, 80.19311610),
-    "600015": (13.02147994, 80.22940007),
-    "600028": (13.02418865, 80.26574570),
-    "600086": (13.01882901, 80.25013371),
-    "600098": (13.01657599, 80.20718349),
-    "600020": (13.00861571, 80.26382063),
-    "600032": (13.00634558, 80.21208726),
-    "600027": (12.99369669, 80.17104137),
-    "600025": (13.01180002, 80.23554622),
-    "600095": (13.00159395, 80.07333575),
-    "600085": (13.01153278, 80.24443489),
-    "600022": (13.00120492, 80.22705790),
-    "600037": (13.00314698, 80.19439843),
-    "600090": (13.00035027, 80.26501762),
-    "600036": (12.99346146, 80.23560981),
-    "600115": (12.98791928, 80.24381250),
-    "600042": (12.98731219, 80.21497575),
-    "600061": (12.98350623, 80.18568904),
-    "600074": (12.97790656, 80.10810227),
-    "600041": (12.92107178, 80.24654060),
-    "600114": (12.98256562, 80.19529625),
-    "600088": (12.97756594, 80.21120853),
-    "600070": (12.97077623, 80.13057477),
-    "600113": (12.97360185, 80.23845300),
-    "600044": (12.94443761, 80.08270867),
-    "600075": (12.97247284, 80.14527780),
-    "600043": (12.96535263, 80.15826066),
-    "600091": (12.95940286, 80.19959318),
-    "600117": (12.95986297, 80.17695456),
-    "600096": (12.92217332, 80.21549887),
-    "600047": (12.94009611, 80.11479854),
-    "600100": (12.94342554, 80.18769461),
-    "600016": (12.91284343, 80.17941606),
-    "600064": (12.93264682, 80.14546711),
-    "600045": (12.89426827, 80.10366229),
-    "600059": (12.92470654, 80.12472304),
-    "600073": (12.87473594, 80.16536515),
-    "600046": (12.90527285, 80.12248124),
-    "600119": (12.84670995, 80.22056520),
-    "600048": (12.81084603, 80.12772838),
-    "600069": (12.49833560, 79.97398277)
+PINCODE_MASTER = {
+    "600067": (13.24458812, 80.11956125, "Outer West / Peripheral"),
+    "600103": (13.21852413, 80.28708594, "North Chennai"),
+    "600057": (13.20823684, 80.31938310, "Outer West / Peripheral"),
+    "600055": (13.15200630, 80.06539575, "Outer West / Peripheral"),
+    "600066": (13.17287844, 80.14430264, "Outer West / Peripheral"),
+    "600052": (13.18161067, 80.20075271, "Outer West / Peripheral"),
+    "600019": (13.17301760, 80.29978173, "North Chennai"),
+    "600068": (13.16732425, 80.27486313, "Outer West / Peripheral"),
+    "600062": (13.14855215, 80.11554808, "Outer West / Peripheral"),
+    "600051": (13.16442935, 80.24274514, "North Chennai"),
+    "600060": (13.15984107, 80.21285943, "West/Inner West"),
+    "600063": (13.14641833, 80.23279686, "West/Inner West"),
+    "600081": (13.14166580, 80.27579586, "North Chennai"),
+    "600065": (13.13664436, 80.07599155, "South / OMR / Tambaram"),
+    "600118": (13.13085292, 80.25301868, "North Chennai"),
+    "600099": (13.12735674, 80.20347764, "Outer West / Peripheral"),
+    "600110": (13.13040427, 80.22737043, "North Chennai"),
+    "600053": (13.12576836, 80.15617958, "North Chennai"),
+    "600080": (13.11995567, 80.18563394, "North Chennai"),
+    "600077": (13.09097107, 80.11778444, "Outer West / Peripheral"),
+    "600039": (13.11713793, 80.26141064, "North Chennai"),
+    "600001": (13.09329602, 80.29234733, "North Chennai"),
+    "600054": (13.12153238, 80.08974434, "West/Inner West"),
+    "600021": (13.11375956, 80.28122798, "North Chennai"),
+    "600013": (13.11235222, 80.29319999, "North Chennai"),
+    "600011": (13.11157220, 80.23642517, "North Chennai"),
+    "600082": (13.11271678, 80.22637171, "North Chennai"),
+    "600076": (13.10722147, 80.17469044, "West/Inner West"),
+    "600049": (13.10809330, 80.20458989, "West/Inner West"),
+    "600012": (13.10072145, 80.25438489, "North Chennai"),
+    "600058": (13.08599979, 80.15314580, "West/Inner West"),
+    "600071": (13.08290114, 80.13468571, "West/Inner West"),
+    "600038": (13.09970732, 80.21607728, "Central Chennai"),
+    "600079": (13.09873687, 80.27444704, "West/Inner West"),
+    "600023": (13.09785468, 80.23194790, "Central Chennai"),
+    "600040": (13.08791959, 80.20340556, "Central Chennai"),
+    "600112": (13.09375497, 80.26446011, "North Chennai"),
+    "600101": (13.09346695, 80.19369249, "North Chennai"),
+    "600050": (13.07845424, 80.17154103, "West/Inner West"),
+    "600072": (13.06843045, 80.03952992, "West/Inner West"),
+    "600010": (13.08533821, 80.24161023, "Central Chennai"),
+    "600009": (13.09230677, 80.27978745, "North Chennai"),
+    "600102": (13.08901357, 80.22177351, "North Chennai"),
+    "600003": (13.08615536, 80.27541704, "North Chennai"),
+    "600108": (13.09004952, 80.28378675, "North Chennai"),
+    "600104": (13.07738623, 80.28344719, "Outer West / Peripheral"),
+    "600007": (13.08330279, 80.26371191, "North Chennai"),
+    "600109": (13.08529100, 80.28188795, "North Chennai"),
+    "600030": (13.07852208, 80.22433917, "North Chennai"),
+    "600002": (13.07587854, 80.27184724, "North Chennai"),
+    "600106": (13.07272018, 80.21201510, "Outer West / Peripheral"),
+    "600008": (13.07072237, 80.26052995, "North Chennai"),
+    "600084": (13.07673890, 80.25536237, "North Chennai"),
+    "600031": (13.07382434, 80.24273335, "Central Chennai"),
+    "600107": (13.06642121, 80.19938448, "Outer West / Peripheral"),
+    "600029": (13.07112435, 80.22768880, "West/Inner West"),
+    "600111": (13.05998516, 80.17606474, "North Chennai"),
+    "600034": (13.06162757, 80.24200381, "Central Chennai"),
+    "600005": (13.06115582, 80.27910272, "North Chennai"),
+    "600105": (13.06556481, 80.26477927, "Outer West / Peripheral"),
+    "600094": (13.05871690, 80.22123519, "West/Inner West"),
+    "600026": (13.05464910, 80.21153926, "West/Inner West"),
+    "600014": (13.05249900, 80.26461449, "Central Chennai"),
+    "600006": (13.05816598, 80.25277144, "North Chennai"),
+    "600092": (13.05479426, 80.19262737, "South / OMR / Tambaram"),
+    "600116": (13.03950621, 80.14712513, "South / OMR / Tambaram"),
+    "600024": (13.05095814, 80.22570484, "Central Chennai"),
+    "600093": (13.04982278, 80.19958382, "South / OMR / Tambaram"),
+    "600056": (13.03248812, 80.10160032, "Outer West / Peripheral"),
+    "600087": (13.04286066, 80.17383656, "South / OMR / Tambaram"),
+    "600017": (13.04185857, 80.23566124, "Velachery / Guindy / Saidapet"),
+    "600015": (13.02147994, 80.22940007, "Velachery / Guindy / Saidapet"),
+    "600028": (13.02418865, 80.26574570, "Central Chennai"),
+    "600086": (13.01882901, 80.25013371, "South / OMR / Tambaram"),
+    "600098": (13.01657599, 80.20718349, "Outer West / Peripheral"),
+    "600032": (13.00634558, 80.21208726, "Velachery / Guindy / Saidapet"),
+    "600061": (12.98350623, 80.18568904, "Velachery / Guindy / Saidapet"),
+    "600113": (12.97360185, 80.23845300, "Velachery / Guindy / Saidapet"),
+    "600091": (12.95940286, 80.19959318, "Velachery / Guindy / Saidapet"),
+    "600117": (12.95986297, 80.17695456, "South / OMR / Tambaram"),
+    "600100": (12.94342554, 80.18769461, "South / OMR / Tambaram"),
+    "600064": (12.93264682, 80.14546711, "Velachery / Guindy / Saidapet"),
+    "600045": (12.89426827, 80.10366229, "Velachery / Guindy / Saidapet"),
+    "600119": (12.84670995, 80.22056520, "South / OMR / Tambaram"),
+    "600048": (12.81084603, 80.12772838, "South / OMR / Tambaram"),
+    "600069": (12.49833560, 79.97398277, "Outer West / Peripheral")
 }
 
 # ==================================================
-# GEO HELPERS
+# GEO UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -197,7 +161,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
-# ZONE PRIORITY + NEAREST NEIGHBOUR ROUTING
+# ROUTING ENGINE
 # ==================================================
 def zone_priority_route(df, start_lat, start_lon, zone_priority):
     remaining = df.copy()
@@ -205,8 +169,7 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
     curr_lat, curr_lon = start_lat, start_lon
 
     for zone in zone_priority:
-        zone_df = remaining[remaining["Zone"] == zone].copy()
-
+        zone_df = remaining[remaining.Zone == zone].copy()
         while not zone_df.empty:
             zone_df["Dist"] = zone_df.apply(
                 lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
@@ -214,7 +177,6 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
             )
             nxt = zone_df.sort_values("Dist").iloc[0]
             route.append(nxt)
-
             curr_lat, curr_lon = nxt.Latitude, nxt.Longitude
             zone_df = zone_df[zone_df.Pincode != nxt.Pincode]
             remaining = remaining[remaining.Pincode != nxt.Pincode]
@@ -222,68 +184,18 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
     return pd.DataFrame(route)
 
 # ==================================================
-# PLAN A – CAPACITY + BIKERS
-# ==================================================
-def plan_a(df, lat, lon, wh, bikers, zone_priority, min_cap, max_cap):
-    ordered = zone_priority_route(df, lat, lon, zone_priority)
-
-    if ordered.empty:
-        return pd.DataFrame()
-
-    total_orders = ordered.Orders.sum()
-    effective_min = min_cap if total_orders >= min_cap * bikers else max(1, total_orders // bikers)
-
-    routes, biker, load, seq = [], 1, 0, 0
-    routes.append({"Warehouse": wh, "Biker_ID": biker, "Pincode": wh, "Sequence": 0})
-
-    for _, r in ordered.iterrows():
-        if load >= effective_min and load + r.Orders > max_cap and biker < bikers:
-            biker += 1
-            load = 0
-            seq = 0
-            routes.append({"Warehouse": wh, "Biker_ID": biker, "Pincode": wh, "Sequence": 0})
-
-        load += r.Orders
-        seq += 1
-        routes.append({
-            "Warehouse": wh,
-            "Biker_ID": biker,
-            "Pincode": r.Pincode,
-            "Zone": r.Zone,
-            "Sequence": seq,
-            "Orders": r.Orders
-        })
-
-    return pd.DataFrame(routes)
-
-# ==================================================
-# PLAN B – ONLY BIKERS (FIXED)
+# PLAN B (ONLY BIKER)
 # ==================================================
 def plan_b(df, lat, lon, wh, bikers, zone_priority):
     ordered = zone_priority_route(df, lat, lon, zone_priority).reset_index(drop=True)
-
-    if ordered.empty:
-        return pd.DataFrame()
-
     chunk = math.ceil(len(ordered) / bikers)
-
-    ordered["Biker_ID"] = ((ordered.index.to_series() // chunk) + 1)
-    ordered["Biker_ID"] = ordered["Biker_ID"].clip(upper=bikers)
+    ordered["Biker_ID"] = ((ordered.index.to_series() // chunk) + 1).clip(upper=bikers)
 
     routes = []
-
-    for biker in sorted(ordered["Biker_ID"].unique()):
-        sub = ordered[ordered["Biker_ID"] == biker]
-
-        routes.append({
-            "Warehouse": wh,
-            "Biker_ID": biker,
-            "Pincode": wh,
-            "Sequence": 0
-        })
-
+    for biker in sorted(ordered.Biker_ID.unique()):
+        routes.append({"Warehouse": wh, "Biker_ID": biker, "Pincode": wh, "Sequence": 0})
         seq = 0
-        for _, r in sub.iterrows():
+        for _, r in ordered[ordered.Biker_ID == biker].iterrows():
             seq += 1
             routes.append({
                 "Warehouse": wh,
@@ -297,43 +209,30 @@ def plan_b(df, lat, lon, wh, bikers, zone_priority):
     return pd.DataFrame(routes)
 
 # ==================================================
-# UI INPUTS
+# UI
 # ==================================================
-st.sidebar.header("Capacity & Availability")
-min_cap = st.sidebar.number_input("Minimum orders per biker", 1, 100, 10)
-max_cap = st.sidebar.number_input("Maximum orders per biker", min_cap, 200, 15)
+st.sidebar.header("Riders")
 total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
+uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)", type=["csv", "xlsx"])
 
-uploaded = st.sidebar.file_uploader(
-    "Upload Orders (Pincode, Orders, Zone)",
-    type=["csv", "xlsx"]
-)
-
-# ==================================================
-# RUN
-# ==================================================
 if st.button("Generate Routes") and uploaded:
     orders = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
     orders["Pincode"] = orders["Pincode"].astype(str)
 
-    geo = pd.DataFrame(
-        [{"Pincode": k, "Latitude": v[0], "Longitude": v[1]} for k, v in PINCODE_GEO.items()]
+    master = pd.DataFrame(
+        [
+            {"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
+            for k, v in PINCODE_MASTER.items()
+        ]
     )
 
-    base = orders.merge(geo, on="Pincode", how="inner")
+    base = orders.merge(master, on="Pincode", how="inner")
 
     wh1 = base[base.Zone.isin(WH1_ZONES)]
     wh2 = base[base.Zone.isin(WH2_ZONES)]
 
-    total_orders = base.Orders.sum()
-    wh1_bikers = max(1, round(total_bikers * wh1.Orders.sum() / total_orders))
+    wh1_bikers = max(1, round(total_bikers * len(wh1) / len(base)))
     wh2_bikers = max(1, total_bikers - wh1_bikers)
-
-    st.download_button(
-        "⬇ WH1 Plan A",
-        plan_a(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY, min_cap, max_cap).to_csv(index=False),
-        "WH1_Plan_A.csv"
-    )
 
     st.download_button(
         "⬇ WH1 Plan B",
@@ -342,16 +241,10 @@ if st.button("Generate Routes") and uploaded:
     )
 
     st.download_button(
-        "⬇ WH2 Plan A",
-        plan_a(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY, min_cap, max_cap).to_csv(index=False),
-        "WH2_Plan_A.csv"
-    )
-
-    st.download_button(
         "⬇ WH2 Plan B",
         plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False),
         "WH2_Plan_B.csv"
     )
 
-    st.success("✅ All routes generated successfully")
+    st.success("Routes generated successfully")
 
