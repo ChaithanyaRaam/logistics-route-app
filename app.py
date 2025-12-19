@@ -14,8 +14,8 @@ import math
 # ==================================================
 # PAGE CONFIG
 # ==================================================
-st.set_page_config(page_title="Zone-Aware Route Generator", layout="wide")
-st.title("Multi-Warehouse Route Generator")
+st.set_page_config(page_title="Multi-Warehouse Route Generator", layout="wide")
+st.title("🚚 Multi-Warehouse Route Generator (Zone & Capacity Aware)")
 
 # ==================================================
 # WAREHOUSE LOCATIONS
@@ -24,7 +24,7 @@ WH1_LAT, WH1_LON = 13.02, 80.22   # Chitlapakkam
 WH2_LAT, WH2_LON = 13.08, 80.28   # Guindy
 
 # ==================================================
-# ZONE OWNERSHIP (HARD RULE)
+# ZONE OWNERSHIP
 # ==================================================
 WH1_ZONES = {
     "South / OMR / Tambaram",
@@ -54,7 +54,7 @@ WH2_ZONE_PRIORITY = [
 ]
 
 # ==================================================
-# PINCODE → LAT / LON MASTER (FULL)
+# PINCODE GEO MASTER (FULL)
 # ==================================================
 PINCODE_GEO = {
     "600067": (13.24458812, 80.11956125),
@@ -175,11 +175,11 @@ PINCODE_GEO = {
     "600046": (12.90527285, 80.12248124),
     "600119": (12.84670995, 80.22056520),
     "600048": (12.81084603, 80.12772838),
-    "600069": (12.49833560, 79.97398277),
+    "600069": (12.49833560, 79.97398277)
 }
 
 # ==================================================
-# GEO HELPER
+# GEO
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -194,7 +194,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
-# ZONE-PRIORITY + PROXIMITY ROUTING
+# ZONE PRIORITY + PROXIMITY ROUTING
 # ==================================================
 def zone_priority_route(df, start_lat, start_lon, zone_priority):
     remaining = df.copy()
@@ -203,9 +203,6 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
 
     for zone in zone_priority:
         zone_df = remaining[remaining.Zone == zone].copy()
-        if zone_df.empty:
-            continue
-
         while not zone_df.empty:
             zone_df["Dist"] = zone_df.apply(
                 lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
@@ -220,20 +217,26 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
     return pd.DataFrame(route)
 
 # ==================================================
-# PLAN A & PLAN B
+# PLAN A (MIN + MAX CAPACITY)
 # ==================================================
-def plan_a(df, lat, lon, wh_name, bikers, zone_priority):
+def plan_a(df, lat, lon, wh_name, bikers, zone_priority, min_cap, max_cap):
     ordered = zone_priority_route(df, lat, lon, zone_priority)
-    max_load = math.ceil(ordered.Orders.sum() / bikers)
+    total_orders = ordered.Orders.sum()
+
+    effective_min = min_cap
+    if total_orders < min_cap * bikers:
+        effective_min = max(1, total_orders // bikers)
+
     routes, biker, load, seq = [], 1, 0, 0
     routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
 
     for _, r in ordered.iterrows():
-        if load + r.Orders > max_load and biker < bikers:
+        if load >= effective_min and load + r.Orders > max_cap and biker < bikers:
             biker += 1
             load = 0
             seq = 0
             routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
+
         load += r.Orders
         seq += 1
         routes.append({
@@ -244,18 +247,24 @@ def plan_a(df, lat, lon, wh_name, bikers, zone_priority):
             "Sequence": seq,
             "Orders": r.Orders
         })
+
     return pd.DataFrame(routes)
 
+# ==================================================
+# PLAN B (ONLY BIKER)
+# ==================================================
 def plan_b(df, lat, lon, wh_name, bikers, zone_priority):
-    ordered = zone_priority_route(df, lat, lon, zone_priority)
+    ordered = zone_priority_route(df, lat, lon, zone_priority).reset_index(drop=True)
     chunk = math.ceil(len(ordered) / bikers)
-    ordered["Biker_ID"] = (ordered.index // chunk + 1).clip(upper=bikers)
+
+    ordered["Biker_ID"] = (ordered.index.to_series() // chunk + 1).clip(upper=bikers)
 
     routes = []
     for biker in sorted(ordered.Biker_ID.unique()):
         sub = ordered[ordered.Biker_ID == biker]
         seq = 0
         routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
+
         for _, r in sub.iterrows():
             seq += 1
             routes.append({
@@ -266,14 +275,23 @@ def plan_b(df, lat, lon, wh_name, bikers, zone_priority):
                 "Sequence": seq,
                 "Orders": r.Orders
             })
+
     return pd.DataFrame(routes)
 
 # ==================================================
-# STREAMLIT UI
+# UI INPUTS
 # ==================================================
+st.sidebar.header("Capacity Constraints")
+
+min_capacity = st.sidebar.number_input("Minimum orders per biker", 1, 100, 10)
+max_capacity = st.sidebar.number_input("Maximum orders per biker", min_capacity, 200, 15)
 total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
+
 uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders, Zone)", type=["csv", "xlsx"])
 
+# ==================================================
+# RUN
+# ==================================================
 if st.button("Generate Routes") and uploaded:
     orders = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
     orders["Pincode"] = orders["Pincode"].astype(str)
@@ -287,13 +305,33 @@ if st.button("Generate Routes") and uploaded:
     wh1 = base[base.Zone.isin(WH1_ZONES)]
     wh2 = base[base.Zone.isin(WH2_ZONES)]
 
-    wh1_bikers = max(1, round(total_bikers * wh1.Orders.sum() / base.Orders.sum()))
+    total_orders = base.Orders.sum()
+    wh1_bikers = max(1, round(total_bikers * wh1.Orders.sum() / total_orders))
     wh2_bikers = total_bikers - wh1_bikers
 
-    st.download_button("⬇ WH1 Plan A", plan_a(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY).to_csv(index=False), "WH1_Plan_A.csv")
-    st.download_button("⬇ WH1 Plan B", plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY).to_csv(index=False), "WH1_Plan_B.csv")
-    st.download_button("⬇ WH2 Plan A", plan_a(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False), "WH2_Plan_A.csv")
-    st.download_button("⬇ WH2 Plan B", plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False), "WH2_Plan_B.csv")
+    st.download_button(
+        "⬇ WH1 Plan A",
+        plan_a(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY, min_capacity, max_capacity).to_csv(index=False),
+        "WH1_Plan_A.csv"
+    )
 
-    st.success("Zone-priority routing completed")
+    st.download_button(
+        "⬇ WH1 Plan B",
+        plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY).to_csv(index=False),
+        "WH1_Plan_B.csv"
+    )
+
+    st.download_button(
+        "⬇ WH2 Plan A",
+        plan_a(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY, min_capacity, max_capacity).to_csv(index=False),
+        "WH2_Plan_A.csv"
+    )
+
+    st.download_button(
+        "⬇ WH2 Plan B",
+        plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False),
+        "WH2_Plan_B.csv"
+    )
+
+    st.success("Routes generated successfully")
 
