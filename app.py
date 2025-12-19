@@ -283,17 +283,154 @@ def plan_a(df, lat, lon, wh, min_cap, max_cap, zone_priority):
     extra = (loads < min_cap).sum()
     return df_out, extra
 
-# ==================================================
-# SIDEBAR & UPLOAD (Rest of code remains similar)
-# ==================================================
-st.sidebar.header("Capacity & Riders")
-min_cap = st.sidebar.number_input("Min orders/biker", 1, 100, 10)
-max_cap = st.sidebar.number_input("Max orders/biker", 1, 200, 15)
-total_bikers = st.sidebar.number_input("Total bikers (WH1+WH2)", 1, 200, 5)
-uploaded = st.sidebar.file_uploader("Upload Orders", ["csv", "xlsx"])
 
-if st.button("Generate Optimized Routes") and uploaded:
-    # ... (Processing Logic)
-    # This section will now use the optimized functions above.
-    st.success("Optimized 'Sweep' Routes Generated!")
+# SIDEBAR
+
+# ==================================================
+
+st.sidebar.header("Capacity & Riders")
+
+min_cap = st.sidebar.number_input("Minimum orders per biker",1,100,10)
+
+max_cap = st.sidebar.number_input("Maximum orders per biker",1,200,15)
+
+total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)",1,200,5)
+
+uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)",["csv","xlsx"])
+
+
+# ==================================================
+
+# MAIN LOGIC
+
+# ==================================================
+
+if st.button("Generate Routes") and uploaded:
+
+    orders = pd.read_excel(uploaded) if uploaded.name.endswith("xlsx") else pd.read_csv(uploaded)
+
+    orders["Pincode"] = orders["Pincode"].astype(str).str.strip()
+
+    orders["Orders"] = pd.to_numeric(orders["Orders"], errors="coerce").fillna(0).astype(int)
+
+    orders = orders.groupby("Pincode",as_index=False)["Orders"].sum()
+
+    master = pd.DataFrame([
+
+        {"Pincode":k,"Latitude":v[0],"Longitude":v[1],"Zone":v[2]}
+
+        for k,v in PINCODE_MASTER.items()
+
+    ])
+
+    base = orders.merge(master, on="Pincode", how="left")
+
+    missing = base[base.Zone.isna()]
+
+    if not missing.empty:
+
+        st.error(f"Unmapped pincodes: {missing.Pincode.tolist()}")
+
+        st.stop()
+
+
+    wh1 = base[base.Zone.isin(WH1_ZONES)]
+
+    wh2 = base[~base.Pincode.isin(wh1.Pincode)]
+
+
+
+    wh1_bikers = max(1, round(total_bikers * len(wh1) / len(base)))
+
+    wh2_bikers = max(1, total_bikers - wh1_bikers)
+
+
+
+    st.session_state.WH1_B = plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY)
+
+    st.session_state.WH2_B = plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY)
+
+
+
+    st.session_state.WH1_A, ex1 = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", min_cap, max_cap, WH1_ZONE_PRIORITY)
+
+    st.session_state.WH2_A, ex2 = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", min_cap, max_cap, WH2_ZONE_PRIORITY)
+
+
+
+    st.session_state.SUMMARY_A = {"WH1 Extra Riders":ex1,"WH2 Extra Riders":ex2}
+
+
+
+    st.success("Routes generated successfully")
+
+
+
+# ==================================================
+
+# DOWNLOADS
+
+# ==================================================
+
+st.subheader("⬇ Downloads")
+
+if st.session_state.WH1_B is not None:
+
+    st.download_button("WH1 Plan B", st.session_state.WH1_B.to_csv(index=False), "WH1_Plan_B.csv")
+
+    st.download_button("WH2 Plan B", st.session_state.WH2_B.to_csv(index=False), "WH2_Plan_B.csv")
+
+    st.download_button("WH1 Plan A", st.session_state.WH1_A.to_csv(index=False), "WH1_Plan_A.csv")
+
+    st.download_button("WH2 Plan A", st.session_state.WH2_A.to_csv(index=False), "WH2_Plan_A.csv")
+
+
+
+# ==================================================
+
+# SUMMARY
+
+# ==================================================
+
+st.subheader("📊 Warehouse Summary")
+
+
+
+def show_summary(df, title):
+
+    grp = df.groupby("Biker_ID")["Orders"].sum()
+
+    st.markdown(f"**{title}**")
+
+    st.dataframe(pd.DataFrame([{
+
+        "Total Orders": grp.sum(),
+
+        "Bikers Used": grp.count(),
+
+        "Avg Orders / Biker": round(grp.mean(),1),
+
+        "Max Orders / Biker": grp.max(),
+
+        "Min Orders / Biker": grp.min()
+
+    }]))
+
+
+
+if st.session_state.WH1_B is not None:
+
+    show_summary(st.session_state.WH1_B, "WH1 – Plan B")
+
+    show_summary(st.session_state.WH2_B, "WH2 – Plan B")
+
+    show_summary(st.session_state.WH1_A, "WH1 – Plan A")
+
+    show_summary(st.session_state.WH2_A, "WH2 – Plan A")
+
+
+
+    st.markdown("### Extra Riders Required (Plan A)")
+
+    st.json(st.session_state.SUMMARY_A)
 
