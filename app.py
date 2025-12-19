@@ -10,50 +10,66 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import math
-import folium
-from streamlit_folium import st_folium
 
 # ==================================================
-# SESSION STATE
+# PAGE CONFIG
 # ==================================================
-if "routes_generated" not in st.session_state:
-    st.session_state.routes_generated = False
+st.set_page_config(page_title="Zone-Aware Route Generator", layout="wide")
+st.title("Multi-Warehouse Route Generator")
 
 # ==================================================
-# APP CONFIG
+# WAREHOUSE LOCATIONS
 # ==================================================
-st.set_page_config(
-    page_title="Multi-Warehouse Route Optimizer",
-    layout="wide"
-)
-st.title("🚚 Multi-Warehouse Route Optimizer (Stage-Safe, Capacity-Aware)")
+WH1_LAT, WH1_LON = 13.02, 80.22   # Chitlapakkam
+WH2_LAT, WH2_LON = 13.08, 80.28   # Guindy
 
 # ==================================================
-# LOCKED WAREHOUSES
+# ZONE OWNERSHIP (HARD RULE)
 # ==================================================
-WH1_NAME = "WH1"   # Chitlapakkam
-WH2_NAME = "WH2"   # Guindy
+WH1_ZONES = {
+    "South / OMR / Tambaram",
+    "Outer West / Peripheral"
+}
 
-WH1_LAT, WH1_LON = 13.02, 80.22
-WH2_LAT, WH2_LON = 13.08, 80.28
+WH2_ZONES = {
+    "North Chennai",
+    "West / Inner West",
+    "Central Chennai",
+    "Velachery / Guindy / Saidapet"
+}
 
 # ==================================================
-# PINCODE GEO MASTER (EMBEDDED)
+# ZONE PRIORITY
+# ==================================================
+WH1_ZONE_PRIORITY = [
+    "South / OMR / Tambaram",
+    "Outer West / Peripheral"
+]
+
+WH2_ZONE_PRIORITY = [
+    "Central Chennai",
+    "Velachery / Guindy / Saidapet",
+    "West / Inner West",
+    "North Chennai"
+]
+
+# ==================================================
+# PINCODE → LAT / LON MASTER (FULL)
 # ==================================================
 PINCODE_GEO = {
     "600067": (13.24458812, 80.11956125),
     "600103": (13.21852413, 80.28708594),
-    "600057": (13.20823684, 80.3193831),
-    "600055": (13.1520063, 80.06539575),
+    "600057": (13.20823684, 80.31938310),
+    "600055": (13.15200630, 80.06539575),
     "600066": (13.17287844, 80.14430264),
     "600052": (13.18161067, 80.20075271),
-    "600019": (13.1730176, 80.29978173),
+    "600019": (13.17301760, 80.29978173),
     "600068": (13.16732425, 80.27486313),
     "600062": (13.14855215, 80.11554808),
     "600051": (13.16442935, 80.24274514),
     "600060": (13.15984107, 80.21285943),
     "600063": (13.14641833, 80.23279686),
-    "600081": (13.1416658, 80.27579586),
+    "600081": (13.14166580, 80.27579586),
     "600065": (13.13664436, 80.07599155),
     "600118": (13.13085292, 80.25301868),
     "600099": (13.12735674, 80.20347764),
@@ -66,16 +82,16 @@ PINCODE_GEO = {
     "600054": (13.12153238, 80.08974434),
     "600021": (13.11375956, 80.28122798),
     "600013": (13.11235222, 80.29319999),
-    "600011": (13.1115722, 80.23642517),
+    "600011": (13.11157220, 80.23642517),
     "600082": (13.11271678, 80.22637171),
     "600076": (13.10722147, 80.17469044),
-    "600049": (13.1080933, 80.20458989),
+    "600049": (13.10809330, 80.20458989),
     "600012": (13.10072145, 80.25438489),
-    "600058": (13.08599979, 80.1531458),
+    "600058": (13.08599979, 80.15314580),
     "600071": (13.08290114, 80.13468571),
     "600038": (13.09970732, 80.21607728),
     "600079": (13.09873687, 80.27444704),
-    "600023": (13.09785468, 80.2319479),
+    "600023": (13.09785468, 80.23194790),
     "600040": (13.08791959, 80.20340556),
     "600112": (13.09375497, 80.26446011),
     "600101": (13.09346695, 80.19369249),
@@ -88,22 +104,22 @@ PINCODE_GEO = {
     "600108": (13.09004952, 80.28378675),
     "600104": (13.07738623, 80.28344719),
     "600007": (13.08330279, 80.26371191),
-    "600109": (13.085291, 80.28188795),
+    "600109": (13.08529100, 80.28188795),
     "600030": (13.07852208, 80.22433917),
     "600002": (13.07587854, 80.27184724),
-    "600106": (13.07272018, 80.2120151),
+    "600106": (13.07272018, 80.21201510),
     "600008": (13.07072237, 80.26052995),
-    "600084": (13.0767389, 80.25536237),
+    "600084": (13.07673890, 80.25536237),
     "600031": (13.07382434, 80.24273335),
     "600107": (13.06642121, 80.19938448),
-    "600029": (13.07112435, 80.2276888),
+    "600029": (13.07112435, 80.22768880),
     "600111": (13.05998516, 80.17606474),
     "600034": (13.06162757, 80.24200381),
     "600005": (13.06115582, 80.27910272),
     "600105": (13.06556481, 80.26477927),
-    "600094": (13.0587169, 80.22123519),
-    "600026": (13.0546491, 80.21153926),
-    "600014": (13.052499, 80.26461449),
+    "600094": (13.05871690, 80.22123519),
+    "600026": (13.05464910, 80.21153926),
+    "600014": (13.05249900, 80.26461449),
     "600006": (13.05816598, 80.25277144),
     "600092": (13.05479426, 80.19262737),
     "600116": (13.03950621, 80.14712513),
@@ -119,9 +135,9 @@ PINCODE_GEO = {
     "600083": (13.03479859, 80.21221648),
     "600089": (13.03111379, 80.17885348),
     "600035": (13.02985737, 80.23679016),
-    "600097": (13.02105769, 80.1931161),
+    "600097": (13.02105769, 80.19311610),
     "600015": (13.02147994, 80.22940007),
-    "600028": (13.02418865, 80.2657457),
+    "600028": (13.02418865, 80.26574570),
     "600086": (13.01882901, 80.25013371),
     "600098": (13.01657599, 80.20718349),
     "600020": (13.00861571, 80.26382063),
@@ -130,21 +146,21 @@ PINCODE_GEO = {
     "600025": (13.01180002, 80.23554622),
     "600095": (13.00159395, 80.07333575),
     "600085": (13.01153278, 80.24443489),
-    "600022": (13.00120492, 80.2270579),
+    "600022": (13.00120492, 80.22705790),
     "600037": (13.00314698, 80.19439843),
     "600090": (13.00035027, 80.26501762),
     "600036": (12.99346146, 80.23560981),
-    "600115": (12.98791928, 80.2438125),
+    "600115": (12.98791928, 80.24381250),
     "600042": (12.98731219, 80.21497575),
     "600061": (12.98350623, 80.18568904),
     "600074": (12.97790656, 80.10810227),
-    "600041": (12.92107178, 80.2465406),
+    "600041": (12.92107178, 80.24654060),
     "600114": (12.98256562, 80.19529625),
     "600088": (12.97756594, 80.21120853),
     "600070": (12.97077623, 80.13057477),
-    "600113": (12.97360185, 80.238453),
+    "600113": (12.97360185, 80.23845300),
     "600044": (12.94443761, 80.08270867),
-    "600075": (12.97247284, 80.1452778),
+    "600075": (12.97247284, 80.14527780),
     "600043": (12.96535263, 80.15826066),
     "600091": (12.95940286, 80.19959318),
     "600117": (12.95986297, 80.17695456),
@@ -157,13 +173,13 @@ PINCODE_GEO = {
     "600059": (12.92470654, 80.12472304),
     "600073": (12.87473594, 80.16536515),
     "600046": (12.90527285, 80.12248124),
-    "600119": (12.84670995, 80.2205652),
+    "600119": (12.84670995, 80.22056520),
     "600048": (12.81084603, 80.12772838),
-    "600069": (12.4983356, 79.97398277),
+    "600069": (12.49833560, 79.97398277),
 }
 
 # ==================================================
-# HELPERS
+# GEO HELPER
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -177,180 +193,107 @@ def haversine(lat1, lon1, lat2, lon2):
     )
     return 2 * R * math.asin(math.sqrt(a))
 
-def wh1_stage(d):
-    return 1 if d <= 7 else 2 if d <= 18 else 3
+# ==================================================
+# ZONE-PRIORITY + PROXIMITY ROUTING
+# ==================================================
+def zone_priority_route(df, start_lat, start_lon, zone_priority):
+    remaining = df.copy()
+    route = []
+    curr_lat, curr_lon = start_lat, start_lon
 
-def wh2_stage(d):
-    return 1 if d <= 6 else 2 if d <= 12 else 3 if d <= 20 else 4
+    for zone in zone_priority:
+        zone_df = remaining[remaining.Zone == zone].copy()
+        if zone_df.empty:
+            continue
 
-def assign_bikers_with_auto_relax(df, min_cap, max_cap, max_bikers):
-    biker_id = 1
-    load = 0
-    biker_ids = []
-    loads = []
+        while not zone_df.empty:
+            zone_df["Dist"] = zone_df.apply(
+                lambda x: haversine(curr_lat, curr_lon, x.Latitude, x.Longitude),
+                axis=1
+            )
+            nxt = zone_df.sort_values("Dist").iloc[0]
+            route.append(nxt)
+            curr_lat, curr_lon = nxt.Latitude, nxt.Longitude
+            zone_df = zone_df[zone_df.Pincode != nxt.Pincode]
+            remaining = remaining[remaining.Pincode != nxt.Pincode]
 
-    for _, r in df.iterrows():
-        if load + r.Orders > max_cap:
-            loads.append(load)
-            biker_id += 1
+    return pd.DataFrame(route)
+
+# ==================================================
+# PLAN A & PLAN B
+# ==================================================
+def plan_a(df, lat, lon, wh_name, bikers, zone_priority):
+    ordered = zone_priority_route(df, lat, lon, zone_priority)
+    max_load = math.ceil(ordered.Orders.sum() / bikers)
+    routes, biker, load, seq = [], 1, 0, 0
+    routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
+
+    for _, r in ordered.iterrows():
+        if load + r.Orders > max_load and biker < bikers:
+            biker += 1
             load = 0
-
-        if biker_id > max_bikers:
-            raise ValueError("Biker limit exceeded")
-
-        biker_ids.append(biker_id)
+            seq = 0
+            routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
         load += r.Orders
-
-    loads.append(load)
-    df["Biker_ID"] = biker_ids
-
-    for i, l in enumerate(loads):
-        if l < min_cap and i != len(loads) - 1:
-            raise ValueError("Min capacity violation")
-
-    return df
-
-def build_routes(df, wh_lat, wh_lon, wh_name):
-    routes = []
-    for biker in sorted(df.Biker_ID.unique()):
-        sub = df[df.Biker_ID == biker].copy()
-        sub["Distance"] = sub.apply(
-            lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude),
-            axis=1
-        )
-        sub["Stage"] = sub["Distance"].apply(
-            wh1_stage if wh_name == WH1_NAME else wh2_stage
-        )
-        sub = sub.sort_values(["Stage", "Distance"])
-
-        seq = 1
+        seq += 1
         routes.append({
             "Warehouse": wh_name,
             "Biker_ID": biker,
-            "Pincode": wh_name,
-            "Latitude": wh_lat,
-            "Longitude": wh_lon,
-            "Stage": 0,
-            "Sequence": seq
+            "Pincode": r.Pincode,
+            "Zone": r.Zone,
+            "Sequence": seq,
+            "Orders": r.Orders
         })
+    return pd.DataFrame(routes)
 
+def plan_b(df, lat, lon, wh_name, bikers, zone_priority):
+    ordered = zone_priority_route(df, lat, lon, zone_priority)
+    chunk = math.ceil(len(ordered) / bikers)
+    ordered["Biker_ID"] = (ordered.index // chunk + 1).clip(upper=bikers)
+
+    routes = []
+    for biker in sorted(ordered.Biker_ID.unique()):
+        sub = ordered[ordered.Biker_ID == biker]
+        seq = 0
+        routes.append({"Warehouse": wh_name, "Biker_ID": biker, "Pincode": wh_name, "Sequence": 0})
         for _, r in sub.iterrows():
             seq += 1
             routes.append({
                 "Warehouse": wh_name,
                 "Biker_ID": biker,
                 "Pincode": r.Pincode,
-                "Latitude": r.Latitude,
-                "Longitude": r.Longitude,
-                "Stage": r.Stage,
-                "Sequence": seq
+                "Zone": r.Zone,
+                "Sequence": seq,
+                "Orders": r.Orders
             })
-
     return pd.DataFrame(routes)
 
-def plot_route(df):
-    df = df.sort_values("Sequence")
-    m = folium.Map(
-        location=[df.iloc[0].Latitude, df.iloc[0].Longitude],
-        zoom_start=12,
-        tiles="cartodbpositron"
-    )
-    coords = []
-    for _, r in df.iterrows():
-        coords.append([r.Latitude, r.Longitude])
-        folium.Marker(
-            [r.Latitude, r.Longitude],
-            popup=f"{r.Sequence} | {r.Pincode}"
-        ).add_to(m)
-    folium.PolyLine(coords, weight=4).add_to(m)
-    return m
+# ==================================================
+# STREAMLIT UI
+# ==================================================
+total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
+uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders, Zone)", type=["csv", "xlsx"])
 
-# ==================================================
-# SIDEBAR INPUTS
-# ==================================================
-st.sidebar.header("Capacity & Availability")
-min_capacity = st.sidebar.number_input("Minimum orders per biker", 1, 200, 10)
-max_capacity = st.sidebar.number_input("Maximum orders per biker", min_capacity, 300, 15)
-total_bikers = st.sidebar.number_input("Total bikers available (WH1 + WH2)", 1, 200, 5)
-
-uploaded = st.sidebar.file_uploader(
-    "Upload Orders (Pincode, Orders, Zone)",
-    type=["csv", "xlsx"]
-)
-
-# ==================================================
-# GENERATE ROUTES
-# ==================================================
 if st.button("Generate Routes") and uploaded:
+    orders = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+    orders["Pincode"] = orders["Pincode"].astype(str)
 
-    orders = (
-        pd.read_csv(uploaded)
-        if uploaded.name.endswith(".csv")
-        else pd.read_excel(uploaded)
+    geo = pd.DataFrame(
+        [{"Pincode": k, "Latitude": v[0], "Longitude": v[1]} for k, v in PINCODE_GEO.items()]
     )
 
-    orders.columns = orders.columns.str.strip().str.lower()
-    orders = orders.rename(columns={
-        "pincode": "Pincode",
-        "orders": "Orders",
-        "zone": "Zone"
-    })
+    base = orders.merge(geo, on="Pincode", how="inner")
 
-    orders["Pincode"] = orders["Pincode"].astype(str)
-    orders["Orders"] = orders["Orders"].astype(int)
+    wh1 = base[base.Zone.isin(WH1_ZONES)]
+    wh2 = base[base.Zone.isin(WH2_ZONES)]
 
-    geo_df = pd.DataFrame([
-        {"Pincode": p, "Latitude": v[0], "Longitude": v[1]}
-        for p, v in PINCODE_GEO.items()
-    ])
+    wh1_bikers = max(1, round(total_bikers * wh1.Orders.sum() / base.Orders.sum()))
+    wh2_bikers = total_bikers - wh1_bikers
 
-    base = orders.merge(geo_df, on="Pincode", how="inner")
-    st.success(f"Mapped {base['Pincode'].nunique()} pincodes")
+    st.download_button("⬇ WH1 Plan A", plan_a(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY).to_csv(index=False), "WH1_Plan_A.csv")
+    st.download_button("⬇ WH1 Plan B", plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY).to_csv(index=False), "WH1_Plan_B.csv")
+    st.download_button("⬇ WH2 Plan A", plan_a(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False), "WH2_Plan_A.csv")
+    st.download_button("⬇ WH2 Plan B", plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY).to_csv(index=False), "WH2_Plan_B.csv")
 
-    base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON), axis=1)
-    base["D2"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH2_LAT, WH2_LON), axis=1)
-
-    wh1 = base[base.D1 <= base.D2].copy()
-    wh2 = base[base.D1 > base.D2].copy()
-
-    wh1_req = math.ceil(wh1.Orders.sum() / max_capacity) if not wh1.empty else 0
-    wh2_req = math.ceil(wh2.Orders.sum() / max_capacity) if not wh2.empty else 0
-
-    if wh1_req + wh2_req > total_bikers:
-        st.error("Insufficient bikers for given demand")
-        st.stop()
-
-    wh1["Stage"] = wh1.apply(lambda x: wh1_stage(haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON)), axis=1)
-    wh2["Stage"] = wh2.apply(lambda x: wh2_stage(haversine(x.Latitude, x.Longitude, WH2_LAT, WH2_LON)), axis=1)
-
-    wh1 = wh1.sort_values(["Stage"])
-    wh2 = wh2.sort_values(["Stage"])
-
-    wh1 = assign_bikers_with_auto_relax(wh1, min_capacity, max_capacity, wh1_req)
-    wh2 = assign_bikers_with_auto_relax(wh2, min_capacity, max_capacity, wh2_req)
-
-    st.session_state.wh1_routes = build_routes(wh1, WH1_LAT, WH1_LON, WH1_NAME)
-    st.session_state.wh2_routes = build_routes(wh2, WH2_LAT, WH2_LON, WH2_NAME)
-    st.session_state.routes_generated = True
-
-# ==================================================
-# DISPLAY
-# ==================================================
-if st.session_state.routes_generated:
-
-    st.subheader("🛵 WH1 Routes")
-    tabs1 = st.tabs([f"Biker {i}" for i in sorted(st.session_state.wh1_routes.Biker_ID.unique())])
-    for tab, biker in zip(tabs1, sorted(st.session_state.wh1_routes.Biker_ID.unique())):
-        with tab:
-            df = st.session_state.wh1_routes[st.session_state.wh1_routes.Biker_ID == biker]
-            st.dataframe(df)
-            st_folium(plot_route(df), height=450)
-
-    st.subheader("🛵 WH2 Routes")
-    tabs2 = st.tabs([f"Biker {i}" for i in sorted(st.session_state.wh2_routes.Biker_ID.unique())])
-    for tab, biker in zip(tabs2, sorted(st.session_state.wh2_routes.Biker_ID.unique())):
-        with tab:
-            df = st.session_state.wh2_routes[st.session_state.wh2_routes.Biker_ID == biker]
-            st.dataframe(df)
-            st_folium(plot_route(df), height=450)
+    st.success("Zone-priority routing completed")
 
