@@ -193,29 +193,42 @@ def route_inside_cluster(df, start_lat, start_lon):
     if df.empty: return df
     remaining = df.copy()
     route = []
-    clat, clon = start_lat, start_lon
 
-    # Determine if we are generally moving North or South
+    # 1. Determine general flow direction
+    # If the average Latitude of the cluster is higher than our starting point,
+    # we are moving North.
     is_northbound = remaining['Latitude'].mean() > start_lat
 
+    # 2. Pre-Sort the entire cluster to create a "Sweep"
+    # This prevents the greedy 'nearest neighbor' from jumping past a pincode
+    # that is 'on the way' just because another one is slightly closer.
+    remaining = remaining.sort_values(
+        by=["Latitude", "Longitude"],
+        ascending=[is_northbound, True]
+    )
+
+    clat, clon = start_lat, start_lon
+
     while not remaining.empty:
+        # Standard distance for reference
         remaining['dist'] = remaining.apply(
             lambda r: haversine(clat, clon, r.Latitude, r.Longitude), axis=1
         )
 
-        # Apply Backtrack Penalty to prevent jumping over pincodes
-        def calculate_bias(row):
+        # 3. Apply a heavy Backtrack Penalty
+        # If moving North, any point behind us (South) gets a 20km penalty.
+        def directional_penalty(row):
             penalty = 0
-            # If moving North, penalty for picking a point South of current position
-            if is_northbound and row.Latitude < clat - 0.005:
-                penalty = 10.0
-            # If moving South, penalty for picking a point North of current position
-            elif not is_northbound and row.Latitude > clat + 0.005:
-                penalty = 10.0
+            if is_northbound and row.Latitude < (clat - 0.002):
+                penalty = 20.0
+            elif not is_northbound and row.Latitude > (clat + 0.002):
+                penalty = 20.0
             return row.dist + penalty
 
-        remaining['adjusted_dist'] = remaining.apply(calculate_bias, axis=1)
-        nxt_idx = remaining['adjusted_dist'].idxmin()
+        remaining['adj_dist'] = remaining.apply(directional_penalty, axis=1)
+
+        # Pick the best next stop
+        nxt_idx = remaining['adj_dist'].idxmin()
         nxt = remaining.loc[nxt_idx]
 
         route.append(nxt)
@@ -226,36 +239,24 @@ def route_inside_cluster(df, start_lat, start_lon):
 
 def cluster_aware_route(df, start_lat, start_lon, zone_priority):
     remaining = df.copy()
-    final = []
-    clat, clon = start_lat, start_lon
+    final_route = []
+    current_lat, current_lon = start_lat, start_lon
 
     for zone in zone_priority:
-        zdf = remaining[remaining.Zone == zone].copy()
-        if zdf.empty: continue
+        zone_df = remaining[remaining.Zone == zone].copy()
+        if zone_df.empty:
+            continue
 
-        # --- UNIVERSAL FLOW FIX ---
-        # Determine the "Target" of the next zone relative to current position
-        # If the zone is mostly North of us, sort ascending (South -> North)
-        # If the zone is mostly South of us, sort descending (North -> South)
-        zone_avg_lat = zdf['Latitude'].mean()
+        # Route this specific zone using the Sweep Logic
+        routed_zone = route_inside_cluster(zone_df, current_lat, current_lon)
+        final_route.append(routed_zone)
 
-        if zone_avg_lat > clat:
-            # We are moving UP (Northbound)
-            zdf = zdf.sort_values(by="Latitude", ascending=True)
-        else:
-            # We are moving DOWN (Southbound)
-            zdf = zdf.sort_values(by="Latitude", ascending=False)
-        # ---------------------------
+        # Update position to the last pincode of the completed zone
+        last_stop = routed_zone.iloc[-1]
+        current_lat, current_lon = last_stop.Latitude, last_stop.Longitude
+        remaining = remaining[~remaining.Pincode.isin(routed_zone.Pincode)]
 
-        # Now run the nearest neighbor on the pre-sorted 'Sweep'
-        routed = route_inside_cluster(zdf, clat, clon)
-        final.append(routed)
-
-        last = routed.iloc[-1]
-        clat, clon = last.Latitude, last.Longitude
-        remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
-
-    return pd.concat(final).reset_index(drop=True)
+    return pd.concat(final_route).reset_index(drop=True)
 
 # ==================================================
 # PLAN B — EQUAL SPLIT
