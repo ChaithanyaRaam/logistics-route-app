@@ -23,18 +23,19 @@ if "routes_generated" not in st.session_state:
 # ==================================================
 # APP CONFIG
 # ==================================================
-st.set_page_config(
-    page_title="Multi-Warehouse Route Optimizer",
-    layout="wide"
-)
-st.title("🚚 Multi-Warehouse Route Optimization (Stage-Based + Visual Validation)")
+st.set_page_config(page_title="Route Optimizer", layout="wide")
+st.title("🚚 Multi-Warehouse Route Optimizer (Stage-Safe)")
 
 # ==================================================
-# CONSTANTS
+# LOCKED WAREHOUSES (DO NOT EDIT)
 # ==================================================
+WH1_NAME = "WH1"
+WH2_NAME = "WH2"
+
+WH1_LAT, WH1_LON = 13.02, 80.22     # Chitlapakkam
+WH2_LAT, WH2_LON = 13.08, 80.28     # Guindy
+
 KML_PATH = "data/chennai_pincodes.kml"
-WH1_NAME = "WH1"   # Chitlapakkam
-WH2_NAME = "WH2"   # Guindy
 
 # ==================================================
 # GEO HELPERS
@@ -44,306 +45,186 @@ def haversine(lat1, lon1, lat2, lon2):
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
+        math.sin(dlat / 2) ** 2 +
+        math.cos(math.radians(lat1)) *
+        math.cos(math.radians(lat2)) *
+        math.sin(dlon / 2) ** 2
     )
     return 2 * R * math.asin(math.sqrt(a))
 
+# ==================================================
+# STAGE RULES
+# ==================================================
+def wh1_stage(d):
+    if d <= 7: return 1
+    elif d <= 18: return 2
+    else: return 3
 
-def bearing(lat1, lon1, lat2, lon2):
-    return math.atan2(
-        math.radians(lon2 - lon1),
-        math.radians(lat2 - lat1)
-    )
+def wh2_stage(d):
+    if d <= 6: return 1
+    elif d <= 12: return 2
+    elif d <= 20: return 3
+    else: return 4
 
 # ==================================================
-# STAGE LOGIC
+# KML LOADER
 # ==================================================
-def wh1_stage(distance_km):
-    if distance_km <= 7:
-        return 1
-    elif distance_km <= 18:
-        return 2
-    else:
-        return 3
-
-
-def wh2_stage(distance_km):
-    if distance_km <= 6:
-        return 1
-    elif distance_km <= 12:
-        return 2
-    elif distance_km <= 20:
-        return 3
-    else:
-        return 4
-
-# ==================================================
-# KML LOADER (LOCAL)
-# ==================================================
-def parse_kml_local(path):
-    with open(path, "rb") as f:
-        root = ET.fromstring(f.read())
-
+def parse_kml(path):
+    root = ET.parse(path).getroot()
     ns = {"kml": "http://www.opengis.net/kml/2.2"}
     rows = []
 
     for pm in root.findall(".//kml:Placemark", ns):
         name = pm.find("kml:name", ns)
         coord = pm.find(".//kml:coordinates", ns)
-        if name is None or coord is None:
+        if not name or not coord:
             continue
-
         lon, lat, *_ = coord.text.strip().split(",")
         rows.append({
-            "Pincode": str(name.text).strip(),
+            "Pincode": name.text.strip(),
             "Latitude": float(lat),
             "Longitude": float(lon)
         })
-
     return pd.DataFrame(rows)
 
 # ==================================================
-# ROUTING ENGINE
+# ZIG-ZAG CHECK
 # ==================================================
-def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
-    routes = []
+def has_zigzag(stages):
+    return stages != sorted(stages)
 
-    for biker_id in sorted(df["Biker_ID"].unique()):
-        grp = df[df["Biker_ID"] == biker_id].copy()
+# ==================================================
+# ROUTE BUILDER (AUTO-FIX)
+# ==================================================
+def build_routes(df, wh_lat, wh_lon, wh_name, plan, max_attempts=3):
+    results = []
 
-        grp["Distance"] = grp.apply(
+    for biker in sorted(df.Biker_ID.unique()):
+        sub = df[df.Biker_ID == biker].copy()
+
+        sub["Distance"] = sub.apply(
             lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude),
             axis=1
         )
 
-        grp["Bearing"] = grp.apply(
-            lambda x: (math.degrees(
-                bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
-            ) + 360) % 360,
-            axis=1
-        )
-
-        grp["Stage"] = grp["Distance"].apply(
+        sub["Stage"] = sub["Distance"].apply(
             wh1_stage if wh_name == WH1_NAME else wh2_stage
         )
 
-        grp = grp.sort_values(["Stage", "Distance", "Bearing"])
+        # retry logic if zig-zag
+        for _ in range(max_attempts):
+            sub = sub.sort_values(["Stage", "Distance"])
+            if not has_zigzag(sub.Stage.tolist()):
+                break
 
         seq = 1
-        routes.append({
+        results.append({
             "Warehouse": wh_name,
-            "Biker_ID": biker_id,
+            "Biker_ID": biker,
             "Pincode": wh_name,
             "Latitude": wh_lat,
             "Longitude": wh_lon,
-            "TotalOrders": 0,
             "Stage": 0,
             "Sequence": seq,
-            "Plan_Type": plan_type
+            "Plan": plan
         })
 
-        for _, r in grp.iterrows():
+        for _, r in sub.iterrows():
             seq += 1
-            routes.append({
+            results.append({
                 "Warehouse": wh_name,
-                "Biker_ID": biker_id,
+                "Biker_ID": biker,
                 "Pincode": r.Pincode,
                 "Latitude": r.Latitude,
                 "Longitude": r.Longitude,
-                "TotalOrders": r.TotalOrders,
                 "Stage": r.Stage,
                 "Sequence": seq,
-                "Plan_Type": plan_type
+                "Plan": plan
             })
 
-    return pd.DataFrame(routes)
+    return pd.DataFrame(results)
 
 # ==================================================
-# PLAN A – CAPACITY BASED
+# MAP
 # ==================================================
-def plan_a(df, capacity, wh_lat, wh_lon, wh_name):
-    df = df.copy()
-    df["Distance"] = df.apply(
-        lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude),
-        axis=1
-    )
-    df["Stage"] = df["Distance"].apply(
-        wh1_stage if wh_name == WH1_NAME else wh2_stage
-    )
-    df = df.sort_values(["Stage", "Distance"])
-
-    assigned, biker, load = [], 1, 0
-    for _, r in df.iterrows():
-        if load + r.TotalOrders > capacity:
-            biker += 1
-            load = 0
-        assigned.append({**r, "Biker_ID": biker})
-        load += r.TotalOrders
-
-    return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan A")
-
-# ==================================================
-# PLAN B – RIDER BASED
-# ==================================================
-def plan_b(df, riders, wh_lat, wh_lon, wh_name):
-    df = df.copy()
-    df["Distance"] = df.apply(
-        lambda x: haversine(wh_lat, wh_lon, x.Latitude, x.Longitude),
-        axis=1
-    )
-    df["Stage"] = df["Distance"].apply(
-        wh1_stage if wh_name == WH1_NAME else wh2_stage
-    )
-    df = df.sort_values(["Stage", "Distance"])
-
-    chunk = math.ceil(len(df) / riders)
-    assigned = []
-    for i in range(riders):
-        for _, r in df.iloc[i * chunk:(i + 1) * chunk].iterrows():
-            assigned.append({**r, "Biker_ID": i + 1})
-
-    return build_geo_routes(pd.DataFrame(assigned), wh_lat, wh_lon, wh_name, "Plan B")
-
-# ==================================================
-# ROUTE MAP
-# ==================================================
-def plot_biker_route(route_df, wh_name):
-    route_df = route_df.sort_values("Sequence")
-    start = route_df.iloc[0]
-
+def plot_route(df):
+    df = df.sort_values("Sequence")
     m = folium.Map(
-        location=[start.Latitude, start.Longitude],
+        location=[df.iloc[0].Latitude, df.iloc[0].Longitude],
         zoom_start=12,
         tiles="cartodbpositron"
     )
 
     coords = []
-    for _, r in route_df.iterrows():
+    for _, r in df.iterrows():
         coords.append([r.Latitude, r.Longitude])
         folium.Marker(
             [r.Latitude, r.Longitude],
-            popup=f"{r.Pincode} | Seq {r.Sequence}",
+            popup=f"{r.Sequence} | {r.Pincode} | Stage {r.Stage}"
         ).add_to(m)
 
     folium.PolyLine(coords, weight=4).add_to(m)
     return m
 
 # ==================================================
-# SIDEBAR INPUTS
+# INPUT
 # ==================================================
-st.sidebar.header("Warehouses")
-wh1_lat = st.sidebar.number_input("WH1 Latitude", value=13.02)
-wh1_lon = st.sidebar.number_input("WH1 Longitude", value=80.22)
-
-enable_wh2 = st.sidebar.checkbox("Enable WH2", True)
-if enable_wh2:
-    wh2_lat = st.sidebar.number_input("WH2 Latitude", value=13.08)
-    wh2_lon = st.sidebar.number_input("WH2 Longitude", value=80.28)
-
-st.sidebar.header("Riders")
-capacity_per_rider = st.sidebar.number_input("Capacity per Rider", 1, 50, 10)
-total_riders = st.sidebar.number_input("Total Riders", 1, 200, 10)
-
-uploaded_file = st.sidebar.file_uploader(
-    "Upload Orders (Pincode | Orders | Zone)",
+uploaded = st.sidebar.file_uploader(
+    "Upload Orders (Pincode, Orders)",
     type=["csv", "xlsx"]
 )
 
 # ==================================================
-# GENERATE ROUTES (STORE IN SESSION)
+# GENERATE
 # ==================================================
-if st.button("Generate Routes"):
-    base = parse_kml_local(KML_PATH)
+if st.button("Generate Routes") and uploaded is not None:
+    base = parse_kml(KML_PATH)
 
     orders = (
-        pd.read_csv(uploaded_file)
-        if uploaded_file.name.endswith(".csv")
-        else pd.read_excel(uploaded_file)
+        pd.read_csv(uploaded)
+        if uploaded.name.endswith(".csv")
+        else pd.read_excel(uploaded)
     )
 
     orders["Pincode"] = orders["Pincode"].astype(str)
-    orders["Orders"] = pd.to_numeric(orders["Orders"], errors="coerce").fillna(0).astype(int)
-    orders = orders.groupby("Pincode", as_index=False)["Orders"].sum()
+    orders["Orders"] = orders["Orders"].astype(int)
 
-    base = base.merge(orders, on="Pincode", how="left")
-    base["TotalOrders"] = base["Orders"].fillna(0).astype(int)
-    base = base[base["TotalOrders"] > 0]
+    base = base.merge(orders, on="Pincode", how="inner")
 
-    base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, wh1_lat, wh1_lon), axis=1)
-    if enable_wh2:
-        base["D2"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, wh2_lat, wh2_lon), axis=1)
+    base["D1"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH1_LAT, WH1_LON), axis=1)
+    base["D2"] = base.apply(lambda x: haversine(x.Latitude, x.Longitude, WH2_LAT, WH2_LON), axis=1)
 
-        wh1_df = base[base["D1"] <= base["D2"]]
-        wh2_df = base[base["D1"] > base["D2"]]
-        wh1_riders = max(1, round(total_riders * wh1_df.TotalOrders.sum() / base.TotalOrders.sum()))
-        wh2_riders = total_riders - wh1_riders
-    else:
-        wh1_df, wh2_df = base, pd.DataFrame()
-        wh1_riders, wh2_riders = total_riders, 0
+    wh1 = base[base.D1 <= base.D2].copy()
+    wh2 = base[base.D1 > base.D2].copy()
 
-    st.session_state.wh1_plan_a = plan_a(wh1_df, capacity_per_rider, wh1_lat, wh1_lon, WH1_NAME)
-    st.session_state.wh1_plan_b = plan_b(wh1_df, wh1_riders, wh1_lat, wh1_lon, WH1_NAME)
+    wh1["Biker_ID"] = 1
+    wh2["Biker_ID"] = 1
 
-    if enable_wh2:
-        st.session_state.wh2_plan_a = plan_a(wh2_df, capacity_per_rider, wh2_lat, wh2_lon, WH2_NAME)
-        st.session_state.wh2_plan_b = plan_b(wh2_df, wh2_riders, wh2_lat, wh2_lon, WH2_NAME)
+    st.session_state.wh1 = build_routes(wh1, WH1_LAT, WH1_LON, WH1_NAME, "Plan B")
+    st.session_state.wh2 = build_routes(wh2, WH2_LAT, WH2_LON, WH2_NAME, "Plan B")
 
     st.session_state.routes_generated = True
 
 # ==================================================
-# DISPLAY RESULTS (PERSISTENT)
+# DISPLAY (TABS – NO SCROLL)
 # ==================================================
 if st.session_state.routes_generated:
 
-    st.subheader("📦 WH1 – Plan B Routes")
-    st.dataframe(st.session_state.wh1_plan_b)
+    st.subheader("🛵 WH1 Routes")
+    tabs = st.tabs([f"Biker {i}" for i in st.session_state.wh1.Biker_ID.unique()])
 
-    for biker in st.session_state.wh1_plan_b.Biker_ID.unique():
-        st.markdown(f"### 🛵 WH1 – Biker {biker}")
-        m = plot_biker_route(
-            st.session_state.wh1_plan_b[
-                st.session_state.wh1_plan_b.Biker_ID == biker
-            ],
-            WH1_NAME
-        )
-        st_folium(m, height=400)
+    for tab, biker in zip(tabs, st.session_state.wh1.Biker_ID.unique()):
+        with tab:
+            df = st.session_state.wh1[st.session_state.wh1.Biker_ID == biker]
+            st.dataframe(df)
+            st_folium(plot_route(df), height=450)
 
-    st.download_button(
-        "Download WH1 Plan A",
-        st.session_state.wh1_plan_a.to_csv(index=False),
-        "WH1_Plan_A.csv"
-    )
-    st.download_button(
-        "Download WH1 Plan B",
-        st.session_state.wh1_plan_b.to_csv(index=False),
-        "WH1_Plan_B.csv"
-    )
+    st.subheader("🛵 WH2 Routes")
+    tabs = st.tabs([f"Biker {i}" for i in st.session_state.wh2.Biker_ID.unique()])
 
-    if enable_wh2:
-        st.subheader("📦 WH2 – Plan B Routes")
-        st.dataframe(st.session_state.wh2_plan_b)
-
-        for biker in st.session_state.wh2_plan_b.Biker_ID.unique():
-            st.markdown(f"### 🛵 WH2 – Biker {biker}")
-            m = plot_biker_route(
-                st.session_state.wh2_plan_b[
-                    st.session_state.wh2_plan_b.Biker_ID == biker
-                ],
-                WH2_NAME
-            )
-            st_folium(m, height=400)
-
-        st.download_button(
-            "Download WH2 Plan A",
-            st.session_state.wh2_plan_a.to_csv(index=False),
-            "WH2_Plan_A.csv"
-        )
-        st.download_button(
-            "Download WH2 Plan B",
-            st.session_state.wh2_plan_b.to_csv(index=False),
-            "WH2_Plan_B.csv"
-        )
+    for tab, biker in zip(tabs, st.session_state.wh2.Biker_ID.unique()):
+        with tab:
+            df = st.session_state.wh2[st.session_state.wh2.Biker_ID == biker]
+            st.dataframe(df)
+            st_folium(plot_route(df), height=450)
 
