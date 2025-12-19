@@ -93,14 +93,41 @@ def empty_route(plan_type):
 
 
 def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
+    """
+    Zone-aware sweep routing.
+    Eliminates zig-zag and cross-city jumps.
+    """
+
+    def assign_zone(lat, lon):
+        """
+        Chennai-optimized zoning logic.
+        Adjust thresholds if warehouse location changes significantly.
+        """
+        if lon > wh_lon + 0.05 and lat < wh_lat:
+            return "SE"   # OMR / Coastal belt
+        elif lat < wh_lat - 0.03:
+            return "S"    # South
+        elif abs(lat - wh_lat) <= 0.03 and abs(lon - wh_lon) <= 0.03:
+            return "C"    # Central
+        elif lon < wh_lon - 0.04:
+            return "W"    # West
+        elif lat > wh_lat + 0.04 and lon < wh_lon:
+            return "NW"   # North-West (Avadi / Mogappair)
+        else:
+            return "N"    # North / North-East
+
+    ZONE_ORDER = ["SE", "S", "C", "W", "NW", "N"]
+
     routes = []
 
     for biker in sorted(df["Biker_ID"].unique()):
         grp = df[df["Biker_ID"] == biker].copy()
 
-        # --- STEP 1: Compute bearing & distance ---
+        # ---- Compute geo metrics ----
         grp["Bearing"] = grp.apply(
-            lambda x: bearing(wh_lat, wh_lon, x.Latitude, x.Longitude),
+            lambda x: (math.degrees(
+                bearing(wh_lat, wh_lon, x.Latitude, x.Longitude)
+            ) + 360) % 360,
             axis=1
         )
 
@@ -109,18 +136,34 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             axis=1
         )
 
-        # --- STEP 2: Normalize bearing to 0–360 ---
-        grp["Bearing"] = grp["Bearing"].apply(
-            lambda b: (math.degrees(b) + 360) % 360
+        grp["Zone"] = grp.apply(
+            lambda x: assign_zone(x.Latitude, x.Longitude),
+            axis=1
         )
 
-        # --- STEP 3: Sweep-based ordering (PRIMARY) ---
-        grp = grp.sort_values(
-            by=["Bearing", "Distance"]
-        ).reset_index(drop=True)
+        # ---- Zone-wise ordering ----
+        ordered_stops = []
 
-        # --- STEP 4: Build route ---
+        for zone in ZONE_ORDER:
+            zdf = grp[grp["Zone"] == zone].copy()
+            if zdf.empty:
+                continue
+
+            # Sweep within zone
+            zdf = zdf.sort_values(
+                by=["Bearing", "Distance"]
+            )
+
+            ordered_stops.append(zdf)
+
+        if not ordered_stops:
+            continue
+
+        final_df = pd.concat(ordered_stops)
+
+        # ---- Build route with sequence ----
         seq = 1
+
         routes.append({
             "Warehouse": wh_name,
             "Biker_ID": biker,
@@ -132,7 +175,7 @@ def build_geo_routes(df, wh_lat, wh_lon, wh_name, plan_type):
             "Plan_Type": plan_type
         })
 
-        for _, r in grp.iterrows():
+        for _, r in final_df.iterrows():
             seq += 1
             routes.append({
                 "Warehouse": wh_name,
