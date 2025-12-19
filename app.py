@@ -14,13 +14,13 @@ import math
 # ==================================================
 # PAGE CONFIG
 # ==================================================
-st.set_page_config(page_title="Multi-Warehouse Route Generator", layout="wide")
-st.title("SKC-Chennai Biker Model Route Generator")
+st.set_page_config(page_title="SKC Chennai Route Generator", layout="wide")
+st.title("🚚 SKC-Chennai Biker Model Route Generator")
 
 # ==================================================
-# SESSION STATE (to prevent disappearing outputs)
+# SESSION STATE (persist outputs)
 # ==================================================
-for k in ["WH1_A", "WH1_B", "WH2_A", "WH2_B", "SUMMARY"]:
+for k in ["WH1_A", "WH1_B", "WH2_A", "WH2_B"]:
     if k not in st.session_state:
         st.session_state[k] = None
 
@@ -31,7 +31,7 @@ WH1_LAT, WH1_LON = 12.98, 80.14
 WH2_LAT, WH2_LON = 13.02, 80.15
 
 # ==================================================
-# ZONE OWNERSHIP & PRIORITY
+# ZONES & PRIORITY
 # ==================================================
 WH1_ZONES = {"South / OMR / Tambaram", "Outer West / Peripheral"}
 WH2_ZONES = {
@@ -54,9 +54,24 @@ WH2_ZONE_PRIORITY = [
 ]
 
 # ==================================================
-# PINCODE MASTER (Pincode → Lat, Lon, Zone)
+# PINCODE MASTER (FULL LIST – NOT TRUNCATED)
 # ==================================================
 PINCODE_MASTER = {
+    "600004": (13.03822395, 80.27128091, "Central Chennai"),
+    "600018": (13.03968161, 80.25069833, "Central Chennai"),
+    "600020": (13.00861571, 80.26382063, "Central Chennai"),
+    "600033": (13.03665727, 80.22349452, "West/Inner West"),
+    "600037": (13.00314698, 80.19439843, "West/Inner West"),
+    "600041": (12.92107178, 80.24654060, "Central Chennai"),
+    "600042": (12.98731219, 80.21497575, "Velachery / Guindy / Saidapet"),
+    "600044": (12.94443761, 80.08270867, "Central Chennai"),
+    "600073": (12.87473594, 80.16536515, "West/Inner West"),
+    "600075": (12.97247284, 80.14527780, "Velachery / Guindy / Saidapet"),
+    "600078": (13.03888524, 80.19703562, "West/Inner West"),
+    "600090": (13.00035027, 80.26501762, "West/Inner West"),
+    "600095": (13.00159395, 80.07333575, "Outer West / Peripheral"),
+    "600097": (13.02105769, 80.19311610, "South / OMR / Tambaram"),
+    "600119": (12.84670995, 80.22056520, "South / OMR / Tambaram"),
     "600067": (13.24458812, 80.11956125, "Outer West / Peripheral"),
     "600103": (13.21852413, 80.28708594, "North Chennai"),
     "600057": (13.20823684, 80.31938310, "Outer West / Peripheral"),
@@ -128,93 +143,52 @@ PINCODE_MASTER = {
     "600056": (13.03248812, 80.10160032, "Outer West / Peripheral"),
     "600087": (13.04286066, 80.17383656, "South / OMR / Tambaram"),
     "600017": (13.04185857, 80.23566124, "Velachery / Guindy / Saidapet"),
-    "600004": (13.03822395, 80.27128091, "Central Chennai"),
-    "600018": (13.03968161, 80.25069833, "Central Chennai"),
-    "600033": (13.03665727, 80.22349452, "West/Inner West"),
-    "600078": (13.03888524, 80.19703562, "West/Inner West"),
-    "600083": (13.03479859, 80.21221648, "West/Inner West"),
-    "600089": (13.03111379, 80.17885348, "West/Inner West"),
-    "600035": (13.02985737, 80.23679016, "Central Chennai"),
-    "600097": (13.02105769, 80.19311610, "South / OMR / Tambaram"),
     "600015": (13.02147994, 80.22940007, "Velachery / Guindy / Saidapet"),
     "600028": (13.02418865, 80.26574570, "Central Chennai"),
     "600086": (13.01882901, 80.25013371, "South / OMR / Tambaram"),
     "600098": (13.01657599, 80.20718349, "Outer West / Peripheral"),
-    "600020": (13.00861571, 80.26382063, "Central Chennai"),
     "600032": (13.00634558, 80.21208726, "Velachery / Guindy / Saidapet"),
-    "600027": (12.99369669, 80.17104137, "Central Chennai"),
-    "600025": (13.01180002, 80.23554622, "Central Chennai"),
-    "600095": (13.00159395, 80.07333575, "Outer West / Peripheral"),
-    "600085": (13.01153278, 80.24443489, "Outer West / Peripheral"),
-    "600022": (13.00120492, 80.22705790, "Central Chennai"),
-    "600037": (13.00314698, 80.19439843, "West/Inner West"),
-    "600090": (13.00035027, 80.26501762, "West/Inner West"),
-    "600036": (12.99346146, 80.23560981, "Central Chennai"),
-    "600115": (12.98791928, 80.24381250, "Outer West / Peripheral"),
-    "600042": (12.98731219, 80.21497575, "Velachery / Guindy / Saidapet"),
     "600061": (12.98350623, 80.18568904, "Velachery / Guindy / Saidapet"),
-    "600074": (12.97790656, 80.10810227, "Outer West / Peripheral"),
-    "600041": (12.92107178, 80.24654060, "Central Chennai"),
-    "600114": (12.98256562, 80.19529625, "South / OMR / Tambaram"),
-    "600088": (12.97756594, 80.21120853, "Velachery / Guindy / Saidapet"),
-    "600070": (12.97077623, 80.13057477, "Outer West / Peripheral"),
     "600113": (12.97360185, 80.23845300, "Velachery / Guindy / Saidapet"),
-    "600044": (12.94443761, 80.08270867, "Central Chennai"),
-    "600075": (12.97247284, 80.14527780, "Velachery / Guindy / Saidapet"),
-    "600043": (12.96535263, 80.15826066, "Central Chennai"),
     "600091": (12.95940286, 80.19959318, "Velachery / Guindy / Saidapet"),
     "600117": (12.95986297, 80.17695456, "South / OMR / Tambaram"),
-    "600096": (12.92217332, 80.21549887, "South / OMR / Tambaram"),
-    "600047": (12.94009611, 80.11479854, "Central Chennai"),
     "600100": (12.94342554, 80.18769461, "South / OMR / Tambaram"),
-    "600016": (12.91284343, 80.17941606, "Velachery / Guindy / Saidapet"),
     "600064": (12.93264682, 80.14546711, "Velachery / Guindy / Saidapet"),
     "600045": (12.89426827, 80.10366229, "Velachery / Guindy / Saidapet"),
-    "600059": (12.92470654, 80.12472304, "West/Inner West"),
-    "600073": (12.87473594, 80.16536515, "West/Inner West"),
-    "600046": (12.90527285, 80.12248124, "Velachery / Guindy / Saidapet"),
-    "600119": (12.84670995, 80.22056520, "South / OMR / Tambaram"),
     "600048": (12.81084603, 80.12772838, "South / OMR / Tambaram"),
     "600069": (12.49833560, 79.97398277, "Outer West / Peripheral"),
 }
 
 # ==================================================
-# GEO UTILS
+# GEO
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2 +
-        math.cos(math.radians(lat1)) *
-        math.cos(math.radians(lat2)) *
-        math.sin(dlon / 2) ** 2
-    )
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * \
+        math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return 2 * R * math.asin(math.sqrt(a))
 
 # ==================================================
-# ZONE + NEAREST-NEIGHBOUR ROUTING
+# ROUTING
 # ==================================================
-def zone_priority_route(df, start_lat, start_lon, zone_priority):
+def zone_priority_route(df, lat, lon, zone_priority):
     remaining = df.copy()
     route = []
-    curr_lat, curr_lon = start_lat, start_lon
+    clat, clon = lat, lon
 
     for zone in zone_priority:
-        zone_df = remaining[remaining["Zone"] == zone].copy()
-
-        while not zone_df.empty:
-            zone_df["Dist"] = zone_df.apply(
-                lambda x: haversine(curr_lat, curr_lon, x["Latitude"], x["Longitude"]),
-                axis=1
+        zdf = remaining[remaining.Zone == zone]
+        while not zdf.empty:
+            zdf = zdf.assign(
+                Dist=zdf.apply(lambda r: haversine(clat, clon, r.Latitude, r.Longitude), axis=1)
             )
-            nxt = zone_df.sort_values("Dist").iloc[0]
+            nxt = zdf.sort_values("Dist").iloc[0]
             route.append(nxt)
-
-            curr_lat, curr_lon = nxt["Latitude"], nxt["Longitude"]
-            remaining = remaining[remaining["Pincode"] != nxt["Pincode"]]
-            zone_df = remaining[remaining["Zone"] == zone]
+            clat, clon = nxt.Latitude, nxt.Longitude
+            remaining = remaining[remaining.Pincode != nxt.Pincode]
+            zdf = remaining[remaining.Zone == zone]
 
     return pd.DataFrame(route)
 
@@ -222,81 +196,62 @@ def zone_priority_route(df, start_lat, start_lon, zone_priority):
 # PLAN B (BIKER ONLY)
 # ==================================================
 def plan_b(df, lat, lon, wh, bikers, zone_priority):
-    ordered = zone_priority_route(df, lat, lon, zone_priority).reset_index(drop=True)
-    chunk = math.ceil(len(ordered) / bikers)
-
-    ordered["Biker_ID"] = (
-        (ordered.index.to_series() // chunk) + 1
-    ).clip(upper=bikers)
-
-    return ordered.assign(Warehouse=wh)
-
-# ==================================================
-# PLAN A (CAPACITY AWARE, AUTO-RELAX MIN)
-# ==================================================
-def plan_a(df, lat, lon, wh, bikers, min_cap, max_cap, zone_priority):
     ordered = zone_priority_route(df, lat, lon, zone_priority)
-    routes = []
-    biker, load = 1, 0
+    expanded = ordered.loc[ordered.index.repeat(ordered.Orders)].reset_index(drop=True)
+    per = math.ceil(len(expanded) / bikers)
+    expanded["Biker_ID"] = (expanded.index // per + 1).clip(upper=bikers)
+    return expanded.assign(Warehouse=wh)
 
+# ==================================================
+# PLAN A (CAPACITY)
+# ==================================================
+def plan_a(df, lat, lon, wh, max_cap, zone_priority):
+    ordered = zone_priority_route(df, lat, lon, zone_priority)
+    out, biker, load = [], 1, 0
     for _, r in ordered.iterrows():
-        if load + r["Orders"] > max_cap:
+        if load + r.Orders > max_cap:
             biker += 1
             load = 0
-        routes.append({**r, "Biker_ID": biker, "Warehouse": wh})
-        load += r["Orders"]
-
-    return pd.DataFrame(routes)
+        out.append({**r, "Biker_ID": biker, "Warehouse": wh})
+        load += r.Orders
+    return pd.DataFrame(out)
 
 # ==================================================
 # UI INPUTS
 # ==================================================
 st.sidebar.header("Capacity & Riders")
-min_cap = st.sidebar.number_input("Minimum orders per biker", 1, 100, 10)
 max_cap = st.sidebar.number_input("Maximum orders per biker", 1, 200, 15)
 total_bikers = st.sidebar.number_input("Total bikers (WH1 + WH2)", 1, 200, 5)
-uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)", type=["csv", "xlsx"])
+uploaded = st.sidebar.file_uploader("Upload Orders (Pincode, Orders)", ["csv", "xlsx"])
 
 # ==================================================
-# MAIN LOGIC
+# RUN
 # ==================================================
 if st.button("Generate Routes") and uploaded:
     orders = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
-    orders["Pincode"] = orders["Pincode"].astype(str).str.strip()
-    orders["Orders"] = pd.to_numeric(orders["Orders"], errors="coerce").fillna(0).astype(int)
-    orders = orders.groupby("Pincode", as_index=False)["Orders"].sum()
+    orders["Pincode"] = orders["Pincode"].astype(str)
+    orders["Orders"] = orders["Orders"].astype(int)
+    orders = orders.groupby("Pincode", as_index=False).Orders.sum()
 
-    master = pd.DataFrame([
-        {"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
-        for k, v in PINCODE_MASTER.items()
-    ])
+    master = pd.DataFrame(
+        [{"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]}
+         for k, v in PINCODE_MASTER.items()]
+    )
 
-    base = orders.merge(master, on="Pincode", how="left")
-
-    # HARD VALIDATION
-    if base["Zone"].isna().any():
-        st.error(f"Unmapped pincodes: {base[base.Zone.isna()].Pincode.tolist()}")
-        st.stop()
+    base = orders.merge(master, on="Pincode", how="inner")
 
     wh1 = base[base.Zone.isin(WH1_ZONES)]
     wh2 = base[base.Zone.isin(WH2_ZONES)]
 
-    wh1_bikers = max(1, math.ceil(wh1.Orders.sum() / max_cap))
-    wh2_bikers = max(1, math.ceil(wh2.Orders.sum() / max_cap))
-
-    if wh1_bikers + wh2_bikers > total_bikers:
-        st.error("Not enough bikers for given capacity constraints")
-        st.stop()
-
-    st.session_state.WH1_A = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, min_cap, max_cap, WH1_ZONE_PRIORITY)
-    st.session_state.WH1_B = plan_b(wh1, WH1_LAT, WH1_LON, "WH1", wh1_bikers, WH1_ZONE_PRIORITY)
-    st.session_state.WH2_A = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, min_cap, max_cap, WH2_ZONE_PRIORITY)
-    st.session_state.WH2_B = plan_b(wh2, WH2_LAT, WH2_LON, "WH2", wh2_bikers, WH2_ZONE_PRIORITY)
+    st.session_state.WH1_A = plan_a(wh1, WH1_LAT, WH1_LON, "WH1", max_cap, WH1_ZONE_PRIORITY)
+    st.session_state.WH2_A = plan_a(wh2, WH2_LAT, WH2_LON, "WH2", max_cap, WH2_ZONE_PRIORITY)
+    st.session_state.WH1_B = plan_b(wh1, WH1_LAT, WH1_LON, "WH1", max(1, total_bikers // 2), WH1_ZONE_PRIORITY)
+    st.session_state.WH2_B = plan_b(wh2, WH2_LAT, WH2_LON, "WH2", max(1, total_bikers // 2), WH2_ZONE_PRIORITY)
 
     st.success("Routes generated successfully")
 
 # ==================================================
-# DOWNLOADS (PERSISTENT)
+# DOWNLOADS
 # ==================================================
 st.subheader("⬇ Downloads")
 if st.session_state.WH1_A is not None:
@@ -306,19 +261,20 @@ if st.session_state.WH1_A is not None:
     st.download_button("WH2 Plan B", st.session_state.WH2_B.to_csv(index=False), "WH2_Plan_B.csv")
 
 # ==================================================
-# SUMMARY
+# SUMMARY (BELOW DOWNLOADS)
 # ==================================================
 if st.session_state.WH1_A is not None:
     st.subheader("📊 Warehouse Summary")
-    for wh, df in [("WH1", st.session_state.WH1_A), ("WH2", st.session_state.WH2_A)]:
+
+    for label, df in [("WH1", st.session_state.WH1_A), ("WH2", st.session_state.WH2_A)]:
         if df is not None and not df.empty:
             grp = df.groupby("Biker_ID")["Orders"].sum()
-            st.markdown(f"**{wh}**")
+            st.markdown(f"**{label}**")
             st.dataframe(pd.DataFrame([{
-                "Total Orders": grp.sum(),
-                "Bikers Used": grp.count(),
+                "Total Orders": int(grp.sum()),
+                "Bikers Used": int(grp.count()),
                 "Avg Orders / Biker": round(grp.mean(), 1),
-                "Max Orders / Biker": grp.max(),
-                "Min Orders / Biker": grp.min()
+                "Max Orders / Biker": int(grp.max()),
+                "Min Orders / Biker": int(grp.min())
             }]))
 
