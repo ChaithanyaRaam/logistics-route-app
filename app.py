@@ -14,13 +14,10 @@ import numpy as np
 from io import BytesIO
 
 # ==================================================
-# PAGE CONFIG & STATE
+# PAGE CONFIG
 # ==================================================
 st.set_page_config(page_title="SKC Chennai Logistics Optimizer", layout="wide")
-st.title("SKC-Chennai Final Route Optimizer")
-
-if "results" not in st.session_state:
-    st.session_state.results = {}
+st.title("🚚 SKC-Chennai Final Route Optimizer")
 
 # ==================================================
 # CONFIGURATION & MASTER DATA
@@ -150,21 +147,24 @@ PINCODE_MASTER = {
     "600119": (12.84670995, 80.2205652, "South / OMR / Tambaram"),
 }
 
-
 WH1_ZONES = ["South / OMR / Tambaram", "Outer West / Peripheral"]
 WH2_ZONES = ["Velachery / Guindy / Saidapet", "Central Chennai", "West / Inner West", "North Chennai"]
 
+# ==================================================
 # THE "STRICT LADDER" ROUTING ENGINE
 # ==================================================
 def route_as_ladder(df, start_lat, start_lon):
     if df.empty: return df
+    # Determine if cluster is tall (N-S) or wide (E-W)
     lat_span = df['Latitude'].max() - df['Latitude'].min()
     lon_span = df['Longitude'].max() - df['Longitude'].min()
 
     if lat_span > lon_span:
+        # Vertical: Sort N-S or S-N based on entry
         is_forward = df['Latitude'].mean() > start_lat
         return df.sort_values(by='Latitude', ascending=is_forward).reset_index(drop=True)
     else:
+        # Horizontal: Sort E-W or W-E based on entry
         is_forward = df['Longitude'].mean() > start_lon
         return df.sort_values(by='Longitude', ascending=is_forward).reset_index(drop=True)
 
@@ -176,8 +176,10 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
     for zone in zones:
         zdf = remaining[remaining.Zone == zone]
         if zdf.empty: continue
+
         routed = route_as_ladder(zdf, curr_lat, curr_lon)
         full_sequence.append(routed)
+
         last = routed.iloc[-1]
         curr_lat, curr_lon = last.Latitude, last.Longitude
         remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
@@ -185,16 +187,16 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
     return pd.concat(full_sequence) if full_sequence else pd.DataFrame()
 
 # ==================================================
-# UPDATED GENERATORS (SEQUENTIAL BIKER IDs)
+# GENERATORS
 # ==================================================
-def generate_plans(data, total_available_bikers, max_cap):
+def generate_plans(data, total_available_staff, max_cap):
     w1_data = data[data.Zone.isin(WH1_ZONES)]
     w2_data = data[~data.Pincode.isin(w1_data.Pincode)]
 
     seq_w1 = get_optimized_sequence(w1_data, WH1_LAT, WH1_LON, WH1_ZONES)
     seq_w2 = get_optimized_sequence(w2_data, WH2_LAT, WH2_LON, WH2_ZONES)
 
-    # --- PLAN A LOGIC (Capacity-Based) ---
+    # PLAN A Logic (Sequential IDs for Needed count)
     def plan_a_logic(ordered_df, wh_name, cap, start_id):
         res, biker, load = [], start_id, 0
         if ordered_df.empty: return pd.DataFrame(), start_id
@@ -207,32 +209,29 @@ def generate_plans(data, total_available_bikers, max_cap):
         return pd.DataFrame(res), biker
 
     pa1, last_id_w1 = plan_a_logic(seq_w1, "WH1", max_cap, 1)
-    # Start WH2 Biker ID from where WH1 left off (e.g., Biker 4, 5...)
-    pa2, total_bikers_a = plan_a_logic(seq_w2, "WH2", max_cap, last_id_w1 + 1)
+    pa2, total_needed_a = plan_a_logic(seq_w2, "WH2", max_cap, last_id_w1 + 1)
 
-    # --- PLAN B LOGIC (Staff-Based Split) ---
-    w1_b_count = max(1, round(total_available_bikers * len(w1_data) / len(data)))
-    w2_b_count = max(1, total_available_bikers - w1_b_count)
+    # PLAN B Logic (Split among staff)
+    w1_b_count = max(1, round(total_available_staff * len(w1_data) / len(data)))
+    w2_b_count = max(1, total_available_staff - w1_b_count)
 
     pb1 = pd.concat([c.assign(Biker_ID=i+1, Warehouse="WH1") for i, c in enumerate(np.array_split(seq_w1, w1_b_count))]) if not seq_w1.empty else pd.DataFrame()
     pb2 = pd.concat([c.assign(Biker_ID=i+1+w1_b_count, Warehouse="WH2") for i, c in enumerate(np.array_split(seq_w2, w2_b_count))]) if not seq_w2.empty else pd.DataFrame()
 
-    return pd.concat([pa1, pa2]), pd.concat([pb1, pb2]), total_bikers_a
+    return pd.concat([pa1, pa2]), pd.concat([pb1, pb2]), total_needed_a
 
 # ==================================================
 # UI / MAIN
 # ==================================================
-# ... [Inside your if st.button block] ...
-    plan_a, plan_b, total_needed = generate_plans(merged, staff_count, max_cap_input)
+if "results" not in st.session_state:
+    st.session_state.results = {}
 
-    # Calculate extra riders
-    extra = max(0, total_needed - staff_count)
+st.sidebar.header("Operational Constraints")
+max_cap_input = st.sidebar.number_input("Max Orders per Biker (Plan A Limit)", 1, 100, 15)
+staff_count = st.sidebar.number_input("Total Internal Staff Available", 1, 100, 5)
+uploaded_file = st.sidebar.file_uploader("Upload Delivery Data", type=["csv", "xlsx"])
 
-    st.markdown("### 📊 Staffing Summary")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Bikers Needed (Plan A)", total_needed) # This will show 8
-    m2.metric("Total Staff We Have Now", staff_count) # This will show 5
-    m3.metric("Freelancers Needed", extra, delta=extra, delta_color="inverse") # This will show 3
+
 
 if st.button("Generate Dispatch Sheets") and uploaded_file:
     raw = pd.read_excel(uploaded_file) if uploaded_file.name.endswith("xlsx") else pd.read_csv(uploaded_file)
@@ -242,27 +241,31 @@ if st.button("Generate Dispatch Sheets") and uploaded_file:
     master_df = pd.DataFrame([{"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]} for k, v in PINCODE_MASTER.items()])
     merged = raw.groupby('Pincode', as_index=False)['Orders'].sum().merge(master_df, on="Pincode", how="inner")
 
-    plan_a, plan_b = generate_plans(merged, staff_count, max_cap_input)
-    st.session_state.results = {"A": plan_a, "B": plan_b, "staff": staff_count}
+    plan_a, plan_b, total_needed = generate_plans(merged, staff_count, max_cap_input)
+    st.session_state.results = {"A": plan_a, "B": plan_b, "needed": total_needed, "staff": staff_count}
 
 if st.session_state.results:
-    # Logic for extra riders
-    used_a = st.session_state.results["A"]['Biker_ID'].nunique()
-    extra = max(0, used_a - st.session_state.results["staff"])
+    needed = st.session_state.results["needed"]
+    staff = st.session_state.results["staff"]
+    extra = max(0, needed - staff)
 
-    st.success("Routes Optimized via Strict Ladder Sorting.")
+    st.markdown("### 📊 Staffing Summary & Requirements")
     m1, m2, m3 = st.columns(3)
-    m1.metric("Bikers Needed (Plan A)", used_a)
-    m2.metric("Permanent Staff", st.session_state.results["staff"])
-    m3.metric("Freelancers Needed", extra, delta_color="inverse")
+    m1.metric("Bikers Needed (Plan A)", needed)
+    m2.metric("Total Staff We Have Now", staff)
+    m3.metric("Freelancers Needed", extra, delta=extra if extra > 0 else None, delta_color="inverse")
 
     if extra > 0:
-        st.error(f"⚠️ Capacity Alert: You need {extra} extra riders to complete Plan A without exceeding the {max_cap_input}-order limit.")
+        st.error(f"⚠️ Hire {extra} freelancers to stay within the {max_cap_input}-order capacity limit.")
+    else:
+        st.success("✅ Current staff is sufficient for the workload.")
+
+
 
     c1, c2 = st.columns(2)
     c1.download_button("💾 Download Plan A (Capacity)", st.session_state.results["A"].to_csv(index=False), "Plan_A_Dispatch.csv")
     c2.download_button("💾 Download Plan B (Split)", st.session_state.results["B"].to_csv(index=False), "Plan_B_Dispatch.csv")
 
-    st.write("### Preview: Plan A Dispatch Sequence")
-    st.dataframe(st.session_state.results["A"][['Warehouse', 'Biker_ID', 'Pincode', 'Zone', 'Orders']])
+    st.write("### Preview: Plan A Route Sequence")
+    st.dataframe(st.session_state.results["A"][['Warehouse', 'Biker_ID', 'Pincode', 'Orders', 'Zone']])
 
