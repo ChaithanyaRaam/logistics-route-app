@@ -156,41 +156,58 @@ import math
 # 1. GEOGRAPHIC UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371.0  # Earth radius in km
+    """Generalized formula for distance in KM between two coordinates."""
+    R = 6371.0
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
     return 2 * math.asin(math.sqrt(a)) * R
 
-
 # ==================================================
-# THE "STRICT LADDER" ROUTING ENGINE
+# 2. GENERALIZED CORRIDOR SWEEP (SNAKE LOGIC)
 # ==================================================
-def route_as_ladder(df, start_lat, start_lon):
+def route_as_corridor_sweep(df, start_lat, start_lon):
+    """
+    Generalized formula to split a cluster into lanes and sweep
+    them in a snake pattern (S-Curve) to prevent zig-zags.
+    """
     if df.empty: return df
 
+    # Identify if the cluster is taller (Vertical) or wider (Horizontal)
     lat_span = df['Latitude'].max() - df['Latitude'].min()
     lon_span = df['Longitude'].max() - df['Longitude'].min()
 
+    # 1. Split into two 'lanes' based on the median of the narrower dimension
     if lat_span > lon_span:
-        # Vertical Ladder: Determine which end (North or South) is closer to Warehouse
-        p_south = df.loc[df['Latitude'].idxmin()]
-        p_north = df.loc[df['Latitude'].idxmax()]
-        dist_s = haversine(start_lat, start_lon, p_south.Latitude, p_south.Longitude)
-        dist_n = haversine(start_lat, start_lon, p_north.Latitude, p_north.Longitude)
-
-        # Start at the end that is physically closer
-        is_forward = dist_s < dist_n
-        return df.sort_values(by='Latitude', ascending=is_forward).reset_index(drop=True)
+        # Tall Cluster: Create East/West lanes, sweep North/South
+        mid_val = df['Longitude'].median()
+        lane1 = df[df['Longitude'] <= mid_val].copy()
+        lane2 = df[df['Longitude'] > mid_val].copy()
+        sort_col = 'Latitude'
     else:
-        # Horizontal Ladder: Determine if East or West end is closer
-        p_west = df.loc[df['Longitude'].idxmin()]
-        p_east = df.loc[df['Longitude'].idxmax()]
-        dist_w = haversine(start_lat, start_lon, p_west.Latitude, p_west.Longitude)
-        dist_e = haversine(start_lat, start_lon, p_east.Latitude, p_east.Longitude)
+        # Wide Cluster: Create North/South lanes, sweep East/West
+        mid_val = df['Latitude'].median()
+        lane1 = df[df['Latitude'] <= mid_val].copy()
+        lane2 = df[df['Latitude'] > mid_val].copy()
+        sort_col = 'Longitude'
 
-        is_forward = dist_w < dist_e
-        return df.sort_values(by='Longitude', ascending=is_forward).reset_index(drop=True)
+    # 2. Determine Entry: Which Lane end is closest to the current position (Warehouse)?
+    l1_min_pt = lane1.loc[lane1[sort_col].idxmin()]
+    l1_max_pt = lane1.loc[lane1[sort_col].idxmax()]
+
+    dist_to_min = haversine(start_lat, start_lon, l1_min_pt.Latitude, l1_min_pt.Longitude)
+    dist_to_max = haversine(start_lat, start_lon, l1_max_pt.Latitude, l1_max_pt.Longitude)
+
+    # 3. Sort Lane 1 (Start near Warehouse)
+    l1_ascending = dist_to_min < dist_to_max
+    lane1 = lane1.sort_values(by=sort_col, ascending=l1_ascending)
+
+    # 4. Sort Lane 2 (Snake back - opposite direction of Lane 1)
+    # This prevents the 91km jump back to the start of the next street
+    if not lane2.empty:
+        lane2 = lane2.sort_values(by=sort_col, ascending=not l1_ascending)
+
+    return pd.concat([lane1, lane2]).reset_index(drop=True)
 
 def get_optimized_sequence(df, start_lat, start_lon, zones):
     remaining = df.copy()
@@ -201,12 +218,13 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
         zdf = remaining[remaining.Zone == zone]
         if zdf.empty: continue
 
-        routed = route_as_ladder(zdf, curr_lat, curr_lon)
+        # Apply the Generalized Corridor Sweep
+        routed = route_as_corridor_sweep(zdf, curr_lat, curr_lon)
         full_sequence.append(routed)
 
-        # Update position for next zone based on last delivery point
-        last = routed.iloc[-1]
-        curr_lat, curr_lon = last.Latitude, last.Longitude
+        # End trip at the last stop (One-Way Trip)
+        last_stop = routed.iloc[-1]
+        curr_lat, curr_lon = last_stop.Latitude, last_stop.Longitude
         remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
 
     return pd.concat(full_sequence) if full_sequence else pd.DataFrame()
