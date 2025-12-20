@@ -152,20 +152,16 @@ WH2_ZONES = ["Velachery / Guindy / Saidapet", "Central Chennai", "West / Inner W
 
 import math
 
+# ==================================================
+# 1. GEOGRAPHIC UTILS
+# ==================================================
 def haversine(lat1, lon1, lat2, lon2):
-    # Radius of the Earth in kilometers
-    R = 6371.0
-
-    # Convert degrees to radians
+    R = 6371.0  # Earth radius in km
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-
-    # Haversine formula
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
+    dlat, dlon = lat2 - lat1, lon2 - lon1
     a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
-    c = 2 * math.asin(math.sqrt(a))
+    return 2 * math.asin(math.sqrt(a)) * R
 
-    return R * c
 
 # ==================================================
 # THE "STRICT LADDER" ROUTING ENGINE
@@ -173,23 +169,27 @@ def haversine(lat1, lon1, lat2, lon2):
 def route_as_ladder(df, start_lat, start_lon):
     if df.empty: return df
 
-    # Calculate distance of all points from Warehouse
-    df['dist_from_wh'] = df.apply(lambda r: haversine(start_lat, start_lon, r.Latitude, r.Longitude), axis=1)
-
-    # Check if the closest point is at the 'top' or 'bottom' of the latitude range
-    # and sort so the closest point comes first
-    closest_point = df.loc[df['dist_from_wh'].idxmin()]
-
-    # Determine the sorting order based on the closest point
     lat_span = df['Latitude'].max() - df['Latitude'].min()
     lon_span = df['Longitude'].max() - df['Longitude'].min()
 
     if lat_span > lon_span:
-        # Sort so that the point nearest to WH is index 0
-        is_forward = closest_point.Latitude > start_lat
+        # Vertical Ladder: Determine which end (North or South) is closer to Warehouse
+        p_south = df.loc[df['Latitude'].idxmin()]
+        p_north = df.loc[df['Latitude'].idxmax()]
+        dist_s = haversine(start_lat, start_lon, p_south.Latitude, p_south.Longitude)
+        dist_n = haversine(start_lat, start_lon, p_north.Latitude, p_north.Longitude)
+
+        # Start at the end that is physically closer
+        is_forward = dist_s < dist_n
         return df.sort_values(by='Latitude', ascending=is_forward).reset_index(drop=True)
     else:
-        is_forward = closest_point.Longitude > start_lon
+        # Horizontal Ladder: Determine if East or West end is closer
+        p_west = df.loc[df['Longitude'].idxmin()]
+        p_east = df.loc[df['Longitude'].idxmax()]
+        dist_w = haversine(start_lat, start_lon, p_west.Latitude, p_west.Longitude)
+        dist_e = haversine(start_lat, start_lon, p_east.Latitude, p_east.Longitude)
+
+        is_forward = dist_w < dist_e
         return df.sort_values(by='Longitude', ascending=is_forward).reset_index(drop=True)
 
 def get_optimized_sequence(df, start_lat, start_lon, zones):
@@ -204,6 +204,7 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
         routed = route_as_ladder(zdf, curr_lat, curr_lon)
         full_sequence.append(routed)
 
+        # Update position for next zone based on last delivery point
         last = routed.iloc[-1]
         curr_lat, curr_lon = last.Latitude, last.Longitude
         remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
