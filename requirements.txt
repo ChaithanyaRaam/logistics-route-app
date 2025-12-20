@@ -6,3 +6,4 @@ weasyprint
 openpyxl
 fastkml
 streamlit-folium
+matplotlib
