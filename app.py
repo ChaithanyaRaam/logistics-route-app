@@ -150,22 +150,46 @@ PINCODE_MASTER = {
 WH1_ZONES = ["South / OMR / Tambaram", "Outer West / Peripheral"]
 WH2_ZONES = ["Velachery / Guindy / Saidapet", "Central Chennai", "West / Inner West", "North Chennai"]
 
+import math
+
+def haversine(lat1, lon1, lat2, lon2):
+    # Radius of the Earth in kilometers
+    R = 6371.0
+
+    # Convert degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
+    c = 2 * math.asin(math.sqrt(a))
+
+    return R * c
+
 # ==================================================
 # THE "STRICT LADDER" ROUTING ENGINE
 # ==================================================
 def route_as_ladder(df, start_lat, start_lon):
     if df.empty: return df
-    # Determine if cluster is tall (N-S) or wide (E-W)
+
+    # Calculate distance of all points from Warehouse
+    df['dist_from_wh'] = df.apply(lambda r: haversine(start_lat, start_lon, r.Latitude, r.Longitude), axis=1)
+
+    # Check if the closest point is at the 'top' or 'bottom' of the latitude range
+    # and sort so the closest point comes first
+    closest_point = df.loc[df['dist_from_wh'].idxmin()]
+
+    # Determine the sorting order based on the closest point
     lat_span = df['Latitude'].max() - df['Latitude'].min()
     lon_span = df['Longitude'].max() - df['Longitude'].min()
 
     if lat_span > lon_span:
-        # Vertical: Sort N-S or S-N based on entry
-        is_forward = df['Latitude'].mean() > start_lat
+        # Sort so that the point nearest to WH is index 0
+        is_forward = closest_point.Latitude > start_lat
         return df.sort_values(by='Latitude', ascending=is_forward).reset_index(drop=True)
     else:
-        # Horizontal: Sort E-W or W-E based on entry
-        is_forward = df['Longitude'].mean() > start_lon
+        is_forward = closest_point.Longitude > start_lon
         return df.sort_values(by='Longitude', ascending=is_forward).reset_index(drop=True)
 
 def get_optimized_sequence(df, start_lat, start_lon, zones):
