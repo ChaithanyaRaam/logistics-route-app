@@ -25,126 +25,144 @@ st.title("SKC-Chennai Biker Model Route Planner")
 WH1_LAT, WH1_LON = 12.9300, 80.1400  # Chitlapakkam
 WH2_LAT, WH2_LON = 13.0063, 80.2120  # Guindy
 
+
 PINCODE_MASTER = {
-    "600001": (13.09329602, 80.29234733, "North Chennai"),
-    "600002": (13.07587854, 80.27184724, "Central Chennai"),
-    "600003": (13.08615536, 80.27541704, "North Chennai"),
-    "600004": (13.03822395, 80.27128091, "Central Chennai"),
-    "600005": (13.06115582, 80.27910272, "Central Chennai"),
-    "600006": (13.05816598, 80.25277144, "Central Chennai"),
-    "600007": (13.08330279, 80.26371191, "North Chennai"),
-    "600008": (13.07072237, 80.26052995, "Central Chennai"),
-    "600009": (13.09230677, 80.27978745, "North Chennai"),
-    "600010": (13.08533821, 80.24161023, "Central Chennai"),
-    "600011": (13.1115722, 80.23642517, "North Chennai"),
-    "600012": (13.10072145, 80.25438489, "North Chennai"),
-    "600013": (13.11235222, 80.29319999, "North Chennai"),
-    "600014": (13.052499, 80.26461449, "Central Chennai"),
-    "600015": (13.02147994, 80.22940007, "Velachery / Guindy / Saidapet"),
-    "600016": (12.91284343, 80.17941606, "Velachery / Guindy / Saidapet"),
-    "600017": (13.04185857, 80.23566124, "Central Chennai"),
-    "600018": (13.03968161, 80.25069833, "Central Chennai"),
-    "600019": (13.1730176, 80.29978173, "North Chennai"),
-    "600020": (13.00861571, 80.26382063, "South / OMR / Tambaram"),
-    "600021": (13.11375956, 80.28122798, "North Chennai"),
-    "600022": (13.00120492, 80.2270579, "Velachery / Guindy / Saidapet"),
-    "600023": (13.09785468, 80.2319479, "Central Chennai"),
-    "600024": (13.05095814, 80.22570484, "Central Chennai"),
-    "600025": (13.01180002, 80.23554622, "Central Chennai"),
-    "600026": (13.0546491, 80.21153926, "West / Inner West"),
-    "600027": (12.99369669, 80.17104137, "Velachery / Guindy / Saidapet"),
-    "600028": (13.02418865, 80.2657457, "Central Chennai"),
-    "600029": (13.07112435, 80.2276888, "West / Inner West"),
-    "600030": (13.07852208, 80.22433917, "Central Chennai"),
-    "600031": (13.07382434, 80.24273335, "Central Chennai"),
-    "600032": (13.00634558, 80.21208726, "Velachery / Guindy / Saidapet"),
-    "600033": (13.03665727, 80.22349452, "West / Inner West"),
-    "600034": (13.06162757, 80.24200381, "Central Chennai"),
-    "600035": (13.02985737, 80.23679016, "Central Chennai"),
-    "600036": (12.99346146, 80.23560981, "Velachery / Guindy / Saidapet"),
-    "600037": (13.00314698, 80.19439843, "West / Inner West"),
-    "600038": (13.09970732, 80.21607728, "North Chennai"),
-    "600039": (13.11713793, 80.26141064, "North Chennai"),
-    "600040": (13.08791959, 80.20340556, "Central Chennai"),
-    "600041": (12.92107178, 80.2465406, "South / OMR / Tambaram"),
-    "600042": (12.98731219, 80.21497575, "Velachery / Guindy / Saidapet"),
-    "600043": (12.96535263, 80.15826066, "South / OMR / Tambaram"),
-    "600044": (12.94443761, 80.08270867, "South / OMR / Tambaram"),
-    "600045": (12.89426827, 80.10366229, "South / OMR / Tambaram"),
-    "600046": (12.90527285, 80.12248124, "South / OMR / Tambaram"),
-    "600047": (12.94009611, 80.11479854, "South / OMR / Tambaram"),
-    "600048": (12.81084603, 80.12772838, "South / OMR / Tambaram"),
-    "600049": (13.1080933, 80.20458989, "West / Inner West"),
-    "600050": (13.07845424, 80.17154103, "West / Inner West"),
-    "600051": (13.16442935, 80.24274514, "North Chennai"),
-    "600052": (13.18161067, 80.20075271, "Outer West / Peripheral"),
-    "600053": (13.12576836, 80.15617958, "West / Inner West"),
-    "600054": (13.12153238, 80.08974434, "Outer West / Peripheral"),
-    "600055": (13.1520063, 80.06539575, "Outer West / Peripheral"),
-    "600056": (13.03248812, 80.10160032, "Outer West / Peripheral"),
-    "600057": (13.20823684, 80.3193831, "North Chennai"),
-    "600058": (13.08599979, 80.1531458, "West / Inner West"),
-    "600059": (12.92470654, 80.12472304, "South / OMR / Tambaram"),
-    "600060": (13.15984107, 80.21285943, "North Chennai"),
-    "600061": (12.98350623, 80.18568904, "Velachery / Guindy / Saidapet"),
-    "600062": (13.14855215, 80.11554808, "Outer West / Peripheral"),
-    "600063": (13.14641833, 80.23279686, "South / OMR / Tambaram"),
-    "600064": (12.93264682, 80.14546711, "South / OMR / Tambaram"),
-    "600065": (13.13664436, 80.07599155, "Outer West / Peripheral"),
-    "600066": (13.17287844, 80.14430264, "North Chennai"),
-    "600067": (13.24458812, 80.11956125, "Outer West / Peripheral"),
-    "600068": (13.16732425, 80.27486313, "North Chennai"),
-    "600069": (12.4983356, 79.97398277, "Outer West / Peripheral"),
-    "600070": (12.97077623, 80.13057477, "South / OMR / Tambaram"),
-    "600071": (13.08290114, 80.13468571, "Outer West / Peripheral"),
-    "600072": (13.06843045, 80.03952992, "Outer West / Peripheral"),
-    "600073": (12.87473594, 80.16536515, "South / OMR / Tambaram"),
-    "600074": (12.97790656, 80.10810227, "Outer West / Peripheral"),
-    "600075": (12.97247284, 80.1452778, "South / OMR / Tambaram"),
-    "600076": (13.10722147, 80.17469044, "West / Inner West"),
-    "600077": (13.09097107, 80.11778444, "Outer West / Peripheral"),
-    "600078": (13.03888524, 80.19703562, "West / Inner West"),
-    "600079": (13.09873687, 80.27444704, "North Chennai"),
-    "600080": (13.11995567, 80.18563394, "West / Inner West"),
-    "600081": (13.1416658, 80.27579586, "North Chennai"),
-    "600082": (13.11271678, 80.22637171, "North Chennai"),
-    "600083": (13.03479859, 80.21221648, "West / Inner West"),
-    "600084": (13.0767389, 80.25536237, "Central Chennai"),
-    "600085": (13.01153278, 80.24443489, "Central Chennai"),
-    "600086": (13.01882901, 80.25013371, "Central Chennai"),
-    "600087": (13.04286066, 80.17383656, "West / Inner West"),
-    "600088": (12.97756594, 80.21120853, "Velachery / Guindy / Saidapet"),
-    "600089": (13.03111379, 80.17885348, "West / Inner West"),
-    "600090": (13.00035027, 80.26501762, "South / OMR / Tambaram"),
-    "600091": (12.95940286, 80.19959318, "Velachery / Guindy / Saidapet"),
-    "600092": (13.05479426, 80.19262737, "West / Inner West"),
-    "600093": (13.04982278, 80.19958382, "West / Inner West"),
-    "600094": (13.0587169, 80.22123519, "Central Chennai"),
-    "600095": (13.00159395, 80.07333575, "Outer West / Peripheral"),
-    "600096": (12.92217332, 80.21549887, "South / OMR / Tambaram"),
-    "600097": (13.02105769, 80.1931161, "South / OMR / Tambaram"),
-    "600098": (13.01657599, 80.20718349, "West / Inner West"),
-    "600099": (13.12735674, 80.20347764, "West / Inner West"),
-    "600100": (12.94342554, 80.18769461, "South / OMR / Tambaram"),
-    "600101": (13.09346695, 80.19369249, "West / Inner West"),
-    "600102": (13.08901357, 80.22177351, "Central Chennai"),
-    "600103": (13.21852413, 80.28708594, "North Chennai / Peripheral"),
-    "600104": (13.07738623, 80.28344719, "North Chennai"),
-    "600105": (13.06556481, 80.26477927, "South / OMR / Tambaram"),
-    "600106": (13.07272018, 80.2120151, "West / Inner West"),
-    "600107": (13.06642121, 80.19938448, "West / Inner West"),
-    "600108": (13.09004952, 80.28378675, "North Chennai"),
-    "600109": (13.085291, 80.28188795, "North Chennai"),
-    "600110": (13.13040427, 80.22737043, "North Chennai"),
-    "600111": (13.05998516, 80.17606474, "West / Inner West"),
-    "600112": (13.09375497, 80.26446011, "North Chennai"),
-    "600113": (12.97360185, 80.238453, "Velachery / Guindy / Saidapet"),
-    "600114": (12.98256562, 80.19529625, "Velachery / Guindy / Saidapet"),
-    "600115": (12.98791928, 80.2438125, "South / OMR / Tambaram"),
-    "600116": (13.03950621, 80.14712513, "West / Inner West"),
-    "600117": (12.95986297, 80.17695456, "South / OMR / Tambaram"),
-    "600118": (13.13085292, 80.25301868, "North Chennai"),
-    "600119": (12.84670995, 80.2205652, "South / OMR / Tambaram"),
+    # =========================================================
+    # ZONE: NORTH CHENNAI (Harbour, Perambur, Tiruvottiyur)
+    # =========================================================
+    "600001": (13.0964, 80.2872, "North Chennai"), # Parrys / Georgetown
+    "600003": (13.0880, 80.2760, "North Chennai"), # Park Town
+    "600007": (13.0840, 80.2560, "North Chennai"), # Vepery
+    "600009": (13.1000, 80.2800, "North Chennai"), # Fort St George
+    "600011": (13.1246, 80.2327, "North Chennai"), # Perambur
+    "600012": (13.0970, 80.2580, "North Chennai"), # Perambur Barracks
+    "600013": (13.1167, 80.2917, "North Chennai"), # Royapuram
+    "600019": (13.1614, 80.3013, "North Chennai"), # Tiruvottiyur
+    "600021": (13.1060, 80.2860, "North Chennai"), # Washermanpet
+    "600038": (13.1100, 80.2500, "North Chennai"), # Vyasarpadi
+    "600039": (13.1270, 80.2670, "North Chennai"), # MKB Nagar
+    "600051": (13.1700, 80.2450, "North Chennai"), # Madhavaram
+    "600057": (13.2082, 80.3193, "North Chennai"), # Ennore / Redhills
+    "600060": (13.1600, 80.2130, "North Chennai"), # Madhavaram Milk Colony
+    "600066": (13.1720, 80.1450, "North Chennai"), # Kolathur
+    "600068": (13.1670, 80.2750, "North Chennai"), # Kodungaiyur
+    "600079": (13.1000, 80.2750, "North Chennai"), # Sowcarpet
+    "600081": (13.1410, 80.2760, "North Chennai"), # Tondiarpet
+    "600082": (13.1150, 80.2280, "North Chennai"), # Perambur (Loco)
+    "600103": (13.2185, 80.2870, "North Chennai"), # Manali New Town
+    "600104": (13.0780, 80.2850, "North Chennai"), # High Court
+    "600108": (13.0920, 80.2840, "North Chennai"), # Kondithope
+    "600110": (13.1300, 80.2270, "North Chennai"), # Sembium
+    "600112": (13.0950, 80.2650, "North Chennai"), # Choolai
+    "600118": (13.1320, 80.2550, "North Chennai"), # Erukkancheri
+
+    # =========================================================
+    # ZONE: CENTRAL CHENNAI (T. Nagar, Egmore, Mylapore)
+    # =========================================================
+    "600002": (13.0760, 80.2700, "Central Chennai"), # Anna Road / Triplicane
+    "600004": (13.0382, 80.2713, "Central Chennai"), # Mylapore
+    "600005": (13.0610, 80.2800, "Central Chennai"), # Triplicane
+    "600006": (13.0620, 80.2520, "Central Chennai"), # Thousand Lights
+    "600008": (13.0720, 80.2600, "Central Chennai"), # Egmore
+    "600010": (13.0850, 80.2450, "Central Chennai"), # Kilpauk
+    "600014": (13.0550, 80.2650, "Central Chennai"), # Royapettah
+    "600017": (13.0420, 80.2350, "Central Chennai"), # T. Nagar
+    "600018": (13.0400, 80.2500, "Central Chennai"), # Teynampet
+    "600023": (13.0975, 80.2306, "Central Chennai"), # Ayanavaram
+    "600024": (13.0530, 80.2250, "Central Chennai"), # Kodambakkam
+    "600028": (13.0240, 80.2650, "Central Chennai"), # RA Puram
+    "600030": (13.0780, 80.2240, "Central Chennai"), # Shenoy Nagar
+    "600031": (13.0740, 80.2430, "Central Chennai"), # Chetpet
+    "600034": (13.0620, 80.2420, "Central Chennai"), # Nungambakkam
+    "600035": (13.0300, 80.2370, "Central Chennai"), # Nandanam
+    "600040": (13.0880, 80.2150, "Central Chennai"), # Anna Nagar
+    "600084": (13.0760, 80.2550, "Central Chennai"), # Flowers Road
+    "600085": (13.0120, 80.2440, "Central Chennai"), # Kotturpuram
+    "600086": (13.0200, 80.2550, "Central Chennai"), # Gopalapuram
+    "600094": (13.0587, 80.2212, "Central Chennai"), # Choolaimedu
+    "600102": (13.0890, 80.2218, "Central Chennai"), # Anna Nagar East
+
+    # =========================================================
+    # ZONE: WEST CHENNAI (Ambattur, Porur, Vadapalani)
+    # =========================================================
+    "600026": (13.0550, 80.2115, "West / Inner West"), # Vadapalani
+    "600029": (13.0750, 80.2250, "West / Inner West"), # Aminjikarai
+    "600033": (13.0370, 80.2230, "West / Inner West"), # West Mambalam
+    "600037": (13.0031, 80.1944, "West / Inner West"), # Mogappair
+    "600049": (13.1075, 80.2100, "West / Inner West"), # Villivakkam
+    "600050": (13.0880, 80.1650, "West / Inner West"), # Padi
+    "600053": (13.1150, 80.1500, "West / Inner West"), # Ambattur
+    "600054": (13.1200, 80.0900, "Outer West / Peripheral"), # Avadi
+    "600055": (13.1500, 80.0650, "Outer West / Peripheral"), # Avadi Camp
+    "600056": (13.0320, 80.1016, "Outer West / Peripheral"), # Poonamallee
+    "600058": (13.0860, 80.1530, "West / Inner West"), # Ambattur Ind. Estate
+    "600062": (13.1480, 80.1150, "Outer West / Peripheral"), # Mittanamallee
+    "600065": (13.1360, 80.0760, "Outer West / Peripheral"), # Muthapudupet
+    "600067": (13.2440, 80.1190, "Outer West / Peripheral"), # Gummidipoondi
+    "600069": (12.9650, 80.1050, "Outer West / Peripheral"), # Thiruneermalai (FIXED from Vellore)
+    "600071": (13.0830, 80.1350, "Outer West / Peripheral"), # Thirumullaivoyal
+    "600072": (13.0680, 80.0400, "Outer West / Peripheral"), # Pattabiram
+    "600074": (12.9780, 80.1080, "Outer West / Peripheral"), # Pammal Outskirts
+    "600076": (13.1070, 80.1750, "West / Inner West"), # Korattur RS
+    "600077": (13.0900, 80.1170, "Outer West / Peripheral"), # Thiruverkadu
+    "600078": (13.0390, 80.1970, "West / Inner West"), # Ashok Nagar
+    "600080": (13.1200, 80.1850, "West / Inner West"), # Korattur
+    "600083": (13.0350, 80.2120, "West / Inner West"), # MGR Nagar
+    "600087": (13.0430, 80.1740, "West / Inner West"), # Valasaravakkam
+    "600089": (13.0310, 80.1790, "West / Inner West"), # Ramapuram
+    "600092": (13.0540, 80.1920, "West / Inner West"), # Virugambakkam
+    "600093": (13.0500, 80.1990, "West / Inner West"), # Saligramam
+    "600095": (13.0016, 80.0733, "Outer West / Peripheral"), # Maduravoyal
+    "600098": (13.0166, 80.2072, "West / Inner West"), # Sidco Estate
+    "600099": (13.1300, 80.2050, "West / Inner West"), # Puthagaram
+    "600101": (13.0935, 80.1937, "West / Inner West"), # Anna Nagar West
+    "600106": (13.0720, 80.2120, "West / Inner West"), # Arumbakkam
+    "600107": (13.0660, 80.1990, "West / Inner West"), # Koyambedu
+    "600111": (13.0600, 80.1760, "West / Inner West"), # Maduravoyal South
+    "600116": (13.0400, 80.1470, "West / Inner West"), # Porur
+
+    # =========================================================
+    # ZONE: SOUTH / VELACHERY / GUINDY
+    # =========================================================
+    "600015": (13.0150, 80.2300, "Velachery / Guindy / Saidapet"), # Saidapet
+    "600016": (13.0055, 80.1983, "Velachery / Guindy / Saidapet"), # St Thomas Mount (FIXED)
+    "600022": (13.0012, 80.2270, "Velachery / Guindy / Saidapet"), # Little Mount
+    "600025": (13.0120, 80.2350, "Velachery / Guindy / Saidapet"), # Saidapet West
+    "600027": (12.9930, 80.1710, "Velachery / Guindy / Saidapet"), # Meenambakkam
+    "600032": (13.0102, 80.2155, "Velachery / Guindy / Saidapet"), # Guindy Industrial Estate (FIXED)
+    "600036": (12.9930, 80.2350, "Velachery / Guindy / Saidapet"), # IIT Madras
+    "600042": (12.9780, 80.2200, "Velachery / Guindy / Saidapet"), # Velachery
+    "600061": (12.9830, 80.1860, "Velachery / Guindy / Saidapet"), # Nanganallur
+    "600088": (12.9950, 80.2050, "Velachery / Guindy / Saidapet"), # Adambakkam
+    "600091": (12.9680, 80.1950, "Velachery / Guindy / Saidapet"), # Madipakkam South
+    "600113": (12.9730, 80.2380, "Velachery / Guindy / Saidapet"), # Taramani
+    "600114": (12.9650, 80.2050, "Velachery / Guindy / Saidapet"), # Madipakkam North
+
+    # =========================================================
+    # ZONE: SOUTH OMR & TAMBARAM SUBURBS
+    # =========================================================
+    "600020": (13.0060, 80.2570, "South / OMR / Tambaram"), # Adyar
+    "600041": (12.9860, 80.2600, "South / OMR / Tambaram"), # Thiruvanmiyur
+    "600043": (12.9550, 80.1450, "South / OMR / Tambaram"), # Pallavaram
+    "600044": (12.9500, 80.1400, "South / OMR / Tambaram"), # Chromepet (FIXED)
+    "600045": (12.9240, 80.1150, "South / OMR / Tambaram"), # Tambaram West
+    "600046": (12.9050, 80.1220, "South / OMR / Tambaram"), # Tambaram IAF
+    "600047": (12.9400, 80.1150, "South / OMR / Tambaram"), # Pammal / Anakaputhur
+    "600048": (12.8900, 80.0800, "South / OMR / Tambaram"), # Vandalur
+    "600059": (12.9250, 80.1250, "South / OMR / Tambaram"), # Tambaram East
+    "600063": (12.9045, 80.0886, "South / OMR / Tambaram"), # Perungalathur (FIXED)
+    "600064": (12.9320, 80.1450, "South / OMR / Tambaram"), # Chitlapakkam
+    "600070": (12.9700, 80.1300, "South / OMR / Tambaram"), # Anakaputhur
+    "600073": (12.8750, 80.1650, "South / OMR / Tambaram"), # Selaiyur / Camp Road
+    "600075": (12.9720, 80.1450, "South / OMR / Tambaram"), # Pammal
+    "600090": (12.9980, 80.2600, "South / OMR / Tambaram"), # Besant Nagar
+    "600096": (12.9650, 80.2450, "South / OMR / Tambaram"), # Perungudi
+    "600097": (12.9450, 80.2300, "South / OMR / Tambaram"), # Thoraipakkam
+    "600100": (12.9200, 80.1800, "South / OMR / Tambaram"), # Medavakkam
+    "600105": (13.0650, 80.2650, "South / OMR / Tambaram"), # Adyar (Outskirts)
+    "600115": (12.9880, 80.2430, "South / OMR / Tambaram"), # Taramani Inst.
+    "600117": (12.9600, 80.1770, "South / OMR / Tambaram"), # Keelkattalai
+    "600119": (12.9000, 80.2270, "South / OMR / Tambaram"), # Sholinganallur
 }
 
 WH1_ZONES = ["South / OMR / Tambaram", "Outer West / Peripheral"]
