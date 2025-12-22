@@ -20,149 +20,114 @@ st.set_page_config(page_title="SKC Chennai Logistics Optimizer", layout="wide")
 st.title("SKC-Chennai Biker Model Route Planner")
 
 # ==================================================
-# CONFIGURATION & MASTER DATA (VERIFIED COORDINATES)
+# CONFIGURATION & MASTER DATA (With PRIORITY MAPPING)
 # ==================================================
-WH1_LAT, WH1_LON = 12.9326, 80.1454  # Chitlapakkam (Refined)
-WH2_LAT, WH2_LON = 13.0102, 80.2155  # Guindy (Refined)
+# FORMAT: "Pincode": (Latitude, Longitude, Zone, PRIORITY_LEVEL)
+# Priority 1 = Do First (West/GST)
+# Priority 2 = Do Second (South/Deep)
+# Priority 3 = Do Third (East/Medavakkam)
+# Priority 4 = Do Last (North/City/OMR)
 
-# FULLY CORRECTED MASTER DATA
+WH1_LAT, WH1_LON = 12.9326, 80.1454  # Chitlapakkam
+WH2_LAT, WH2_LON = 13.0102, 80.2155  # Guindy
+
 PINCODE_MASTER = {
-    # --- NORTH CHENNAI ---
-    "600001": (13.0964, 80.2872, "North Chennai"),
-    "600003": (13.0880, 80.2760, "North Chennai"),
-    "600007": (13.0840, 80.2560, "North Chennai"),
-    "600009": (13.1000, 80.2800, "North Chennai"),
-    "600011": (13.1246, 80.2327, "North Chennai"),
-    "600012": (13.0970, 80.2580, "North Chennai"),
-    "600013": (13.1167, 80.2917, "North Chennai"),
-    "600019": (13.1614, 80.3013, "North Chennai"),
-    "600021": (13.1060, 80.2860, "North Chennai"),
-    "600038": (13.1100, 80.2500, "North Chennai"),
-    "600039": (13.1270, 80.2670, "North Chennai"),
-    "600051": (13.1700, 80.2450, "North Chennai"),
-    "600057": (13.2082, 80.3193, "North Chennai"),
-    "600060": (13.1600, 80.2130, "North Chennai"),
-    "600066": (13.1720, 80.1450, "North Chennai"),
-    "600068": (13.1670, 80.2750, "North Chennai"),
-    "600079": (13.1000, 80.2750, "North Chennai"),
-    "600081": (13.1410, 80.2760, "North Chennai"),
-    "600082": (13.1150, 80.2280, "North Chennai"),
-    "600103": (13.2185, 80.2870, "North Chennai"),
-    "600104": (13.0780, 80.2850, "North Chennai"),
-    "600108": (13.0920, 80.2840, "North Chennai"),
-    "600110": (13.1300, 80.2270, "North Chennai"),
-    "600112": (13.0950, 80.2650, "North Chennai"),
-    "600118": (13.1320, 80.2550, "North Chennai"),
+    # =========================================================
+    # WH1 ZONES: SOUTH / OMR / TAMBARAM
+    # Logic: Sweep West (GST) -> South -> East (Medavakkam) -> North (City)
+    # =========================================================
 
-    # --- CENTRAL CHENNAI ---
-    "600002": (13.0760, 80.2700, "Central Chennai"),
-    "600004": (13.0382, 80.2713, "Central Chennai"),
-    "600005": (13.0610, 80.2800, "Central Chennai"),
-    "600006": (13.0620, 80.2520, "Central Chennai"),
-    "600008": (13.0720, 80.2600, "Central Chennai"),
-    "600010": (13.0850, 80.2450, "Central Chennai"),
-    "600014": (13.0550, 80.2650, "Central Chennai"),
-    "600017": (13.0420, 80.2350, "Central Chennai"),
-    "600018": (13.0400, 80.2500, "Central Chennai"),
-    "600023": (13.0975, 80.2306, "Central Chennai"),
-    "600024": (13.0530, 80.2250, "Central Chennai"),
-    "600028": (13.0240, 80.2650, "Central Chennai"),
-    "600030": (13.0780, 80.2240, "Central Chennai"),
-    "600031": (13.0740, 80.2430, "Central Chennai"),
-    "600034": (13.0620, 80.2420, "Central Chennai"),
-    "600035": (13.0300, 80.2370, "Central Chennai"),
-    "600040": (13.0880, 80.2150, "Central Chennai"),
-    "600084": (13.0760, 80.2550, "Central Chennai"),
-    "600085": (13.0120, 80.2440, "Central Chennai"),
-    "600086": (13.0200, 80.2550, "Central Chennai"),
-    "600094": (13.0587, 80.2212, "Central Chennai"),
-    "600102": (13.0890, 80.2218, "Central Chennai"),
+    # --- PRIORITY 1: The "GST Road" West/Central Cluster ---
+    "600064": (12.9320, 80.1450, "South / OMR / Tambaram", 1), # Chitlapakkam (Start)
+    "600044": (12.9500, 80.1400, "South / OMR / Tambaram", 1), # Chromepet
+    "600045": (12.9240, 80.1150, "South / OMR / Tambaram", 1), # Tambaram West
+    "600059": (12.9250, 80.1250, "South / OMR / Tambaram", 1), # Tambaram East
+    "600046": (12.9050, 80.1220, "South / OMR / Tambaram", 1), # Tambaram IAF
+    "600047": (12.9400, 80.1150, "South / OMR / Tambaram", 1), # Pammal
+    "600070": (12.9700, 80.1300, "South / OMR / Tambaram", 1), # Anakaputhur
+    "600075": (12.9720, 80.1450, "South / OMR / Tambaram", 1), # Pammal
+    "600043": (12.9550, 80.1450, "South / OMR / Tambaram", 1), # Pallavaram
 
-    # --- WEST CHENNAI ---
-    "600026": (13.0550, 80.2115, "West / Inner West"),
-    "600029": (13.0750, 80.2250, "West / Inner West"),
-    "600033": (13.0370, 80.2230, "West / Inner West"),
-    "600037": (13.0031, 80.1944, "West / Inner West"),
-    "600049": (13.1075, 80.2100, "West / Inner West"),
-    "600050": (13.0880, 80.1650, "West / Inner West"),
-    "600053": (13.1150, 80.1500, "West / Inner West"),
-    "600054": (13.1200, 80.0900, "Outer West / Peripheral"),
-    "600055": (13.1500, 80.0650, "Outer West / Peripheral"),
-    "600056": (13.0320, 80.1016, "Outer West / Peripheral"),
-    "600058": (13.0860, 80.1530, "West / Inner West"),
-    "600062": (13.1480, 80.1150, "Outer West / Peripheral"),
-    "600065": (13.1360, 80.0760, "Outer West / Peripheral"),
-    "600067": (13.2440, 80.1190, "Outer West / Peripheral"),
-    "600069": (12.9650, 80.1050, "Outer West / Peripheral"), # FIXED
-    "600071": (13.0830, 80.1350, "Outer West / Peripheral"),
-    "600072": (13.0680, 80.0400, "Outer West / Peripheral"),
-    "600074": (12.9780, 80.1080, "Outer West / Peripheral"),
-    "600076": (13.1070, 80.1750, "West / Inner West"),
-    "600077": (13.0900, 80.1170, "Outer West / Peripheral"),
-    "600078": (13.0390, 80.1970, "West / Inner West"),
-    "600080": (13.1200, 80.1850, "West / Inner West"),
-    "600083": (13.0350, 80.2120, "West / Inner West"),
-    "600087": (13.0430, 80.1740, "West / Inner West"),
-    "600089": (13.0310, 80.1790, "West / Inner West"),
-    "600092": (13.0540, 80.1920, "West / Inner West"),
-    "600093": (13.0500, 80.1990, "West / Inner West"),
-    "600095": (13.0016, 80.0733, "Outer West / Peripheral"),
-    "600098": (13.0166, 80.2072, "West / Inner West"),
-    "600099": (13.1300, 80.2050, "West / Inner West"),
-    "600101": (13.0935, 80.1937, "West / Inner West"),
-    "600106": (13.0720, 80.2120, "West / Inner West"),
-    "600107": (13.0660, 80.1990, "West / Inner West"),
-    "600111": (13.0600, 80.1760, "West / Inner West"),
-    "600116": (13.0400, 80.1470, "West / Inner West"),
+    # --- PRIORITY 2: The "Deep South" Cluster ---
+    "600063": (12.9045, 80.0886, "South / OMR / Tambaram", 2), # Perungalathur
+    "600048": (12.8900, 80.0800, "South / OMR / Tambaram", 2), # Vandalur
 
-    # --- SOUTH / VELACHERY / GUINDY ---
-    "600015": (13.0150, 80.2300, "Velachery / Guindy / Saidapet"),
-    "600016": (13.0055, 80.1983, "Velachery / Guindy / Saidapet"), # FIXED
-    "600022": (13.0012, 80.2270, "Velachery / Guindy / Saidapet"),
-    "600025": (13.0120, 80.2350, "Velachery / Guindy / Saidapet"),
-    "600027": (12.9930, 80.1710, "Velachery / Guindy / Saidapet"),
-    "600032": (13.0102, 80.2155, "Velachery / Guindy / Saidapet"), # FIXED
-    "600036": (12.9930, 80.2350, "Velachery / Guindy / Saidapet"),
-    "600042": (12.9780, 80.2200, "Velachery / Guindy / Saidapet"),
-    "600061": (12.9830, 80.1860, "Velachery / Guindy / Saidapet"),
-    "600088": (12.9950, 80.2050, "Velachery / Guindy / Saidapet"),
-    "600091": (12.9680, 80.1950, "Velachery / Guindy / Saidapet"),
-    "600113": (12.9730, 80.2380, "Velachery / Guindy / Saidapet"),
-    "600114": (12.9650, 80.2050, "Velachery / Guindy / Saidapet"),
+    # --- PRIORITY 3: The "East Link" (Camp Road / Medavakkam) ---
+    "600073": (12.8750, 80.1650, "South / OMR / Tambaram", 3), # Selaiyur
+    "600126": (12.8950, 80.1600, "South / OMR / Tambaram", 3), # Madambakkam
+    "600100": (12.9200, 80.1800, "South / OMR / Tambaram", 3), # Medavakkam
+    "600117": (12.9600, 80.1770, "South / OMR / Tambaram", 3), # Keelkattalai
 
-    # --- SOUTH OMR & TAMBARAM ---
-    "600020": (13.0060, 80.2570, "South / OMR / Tambaram"),
-    "600041": (12.9860, 80.2600, "South / OMR / Tambaram"),
-    "600043": (12.9550, 80.1450, "South / OMR / Tambaram"),
-    "600044": (12.9500, 80.1400, "South / OMR / Tambaram"), # FIXED
-    "600045": (12.9240, 80.1150, "South / OMR / Tambaram"),
-    "600046": (12.9050, 80.1220, "South / OMR / Tambaram"),
-    "600047": (12.9400, 80.1150, "South / OMR / Tambaram"),
-    "600048": (12.8900, 80.0800, "South / OMR / Tambaram"),
-    "600059": (12.9250, 80.1250, "South / OMR / Tambaram"),
-    "600063": (12.9045, 80.0886, "South / OMR / Tambaram"), # FIXED
-    "600064": (12.9320, 80.1450, "South / OMR / Tambaram"),
-    "600070": (12.9700, 80.1300, "South / OMR / Tambaram"),
-    "600073": (12.8750, 80.1650, "South / OMR / Tambaram"),
-    "600075": (12.9720, 80.1450, "South / OMR / Tambaram"),
-    "600090": (12.9980, 80.2600, "South / OMR / Tambaram"),
-    "600096": (12.9650, 80.2450, "South / OMR / Tambaram"),
-    "600097": (12.9450, 80.2300, "South / OMR / Tambaram"),
-    "600100": (12.9200, 80.1800, "South / OMR / Tambaram"),
-    "600105": (13.0650, 80.2650, "South / OMR / Tambaram"),
-    "600115": (12.9880, 80.2430, "South / OMR / Tambaram"),
-    "600117": (12.9600, 80.1770, "South / OMR / Tambaram"),
-    "600119": (12.9000, 80.2270, "South / OMR / Tambaram"),
+    # --- PRIORITY 4: OMR / ECR / City South ---
+    "600119": (12.9000, 80.2270, "South / OMR / Tambaram", 4), # Sholinganallur
+    "600097": (12.9450, 80.2300, "South / OMR / Tambaram", 4), # Thoraipakkam
+    "600096": (12.9650, 80.2450, "South / OMR / Tambaram", 4), # Perungudi
+    "600041": (12.9860, 80.2600, "South / OMR / Tambaram", 4), # Thiruvanmiyur
+    "600020": (13.0060, 80.2570, "South / OMR / Tambaram", 4), # Adyar
+    "600090": (12.9980, 80.2600, "South / OMR / Tambaram", 4), # Besant Nagar
+    "600115": (12.9880, 80.2430, "South / OMR / Tambaram", 4), # Taramani
+    "600105": (13.0650, 80.2650, "South / OMR / Tambaram", 4), # Adyar Outskirts
+
+    # =========================================================
+    # WH2 ZONES: GUINDY / CENTRAL / NORTH
+    # Logic: Guindy -> Velachery -> Central -> North
+    # =========================================================
+
+    # --- PRIORITY 1: Immediate Guindy Area ---
+    "600032": (13.0102, 80.2155, "Velachery / Guindy / Saidapet", 1), # Guindy
+    "600016": (13.0055, 80.1983, "Velachery / Guindy / Saidapet", 1), # St Thomas Mount
+    "600015": (13.0150, 80.2300, "Velachery / Guindy / Saidapet", 1), # Saidapet
+    "600022": (13.0012, 80.2270, "Velachery / Guindy / Saidapet", 1), # Little Mount
+
+    # --- PRIORITY 2: Velachery / Madipakkam ---
+    "600042": (12.9780, 80.2200, "Velachery / Guindy / Saidapet", 2), # Velachery
+    "600114": (12.9650, 80.2050, "Velachery / Guindy / Saidapet", 2), # Madipakkam
+    "600091": (12.9680, 80.1950, "Velachery / Guindy / Saidapet", 2), # Madipakkam South
+    "600088": (12.9950, 80.2050, "Velachery / Guindy / Saidapet", 2), # Adambakkam
+    "600061": (12.9830, 80.1860, "Velachery / Guindy / Saidapet", 2), # Nanganallur
+    "600113": (12.9730, 80.2380, "Velachery / Guindy / Saidapet", 2), # Taramani
+
+    # --- PRIORITY 3: Central Chennai (T. Nagar / West Mambalam) ---
+    "600017": (13.0420, 80.2350, "Central Chennai", 3),
+    "600033": (13.0370, 80.2230, "West / Inner West", 3),
+    "600024": (13.0530, 80.2250, "Central Chennai", 3),
+    "600034": (13.0620, 80.2420, "Central Chennai", 3),
+    "600094": (13.0587, 80.2212, "Central Chennai", 3),
+    "600026": (13.0550, 80.2115, "West / Inner West", 3),
+    "600083": (13.0350, 80.2120, "West / Inner West", 3),
+
+    # --- PRIORITY 4: West / Anna Nagar ---
+    "600040": (13.0880, 80.2150, "Central Chennai", 4),
+    "600102": (13.0890, 80.2218, "Central Chennai", 4),
+    "600101": (13.0935, 80.1937, "West / Inner West", 4),
+    "600037": (13.0031, 80.1944, "West / Inner West", 4),
+    "600106": (13.0720, 80.2120, "West / Inner West", 4),
+    "600107": (13.0660, 80.1990, "West / Inner West", 4),
+
+    # --- PRIORITY 5: North Chennai (Default for rest) ---
+    "600001": (13.0964, 80.2872, "North Chennai", 5),
+    "600003": (13.0880, 80.2760, "North Chennai", 5),
+    "600007": (13.0840, 80.2560, "North Chennai", 5),
+    "600011": (13.1246, 80.2327, "North Chennai", 5),
+    "600012": (13.0970, 80.2580, "North Chennai", 5),
+    "600013": (13.1167, 80.2917, "North Chennai", 5),
+    "600021": (13.1060, 80.2860, "North Chennai", 5),
+    "600023": (13.0975, 80.2306, "Central Chennai", 5),
+    "600051": (13.1700, 80.2450, "North Chennai", 5),
+    # ... (Any pincode not listed above gets handled by default priority or Zone mapping)
 }
+
+# --- Default Fallback for missing Pincodes ---
+# If a pincode isn't in the specific list above, we assume Priority 5 (Last)
+DEFAULT_PRIORITY = 5
 
 WH1_ZONES = ["South / OMR / Tambaram", "Outer West / Peripheral"]
 WH2_ZONES = ["Velachery / Guindy / Saidapet", "Central Chennai", "West / Inner West", "North Chennai"]
 
 # ==================================================
-# 1. GEOGRAPHIC UTILS
+# 1. UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
-    """Distance in KM between two coordinates."""
     R = 6371.0
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat, dlon = lat2 - lat1, lon2 - lon1
@@ -170,87 +135,77 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * math.asin(math.sqrt(a)) * R
 
 # ==================================================
-# 2. GENERALIZED CORRIDOR SWEEP (SNAKE LOGIC)
+# 2. PRIORITY-BASED ROUTING ENGINE
 # ==================================================
-def route_as_corridor_sweep(df, start_lat, start_lon):
+def route_priority_nearest(df, start_lat, start_lon):
+    """
+    1. Sorts data by 'Priority' (1 -> 2 -> 3...)
+    2. Within each Priority group, uses Nearest Neighbor to sequence the stops.
+    """
     if df.empty: return df
 
-    lat_span = df['Latitude'].max() - df['Latitude'].min()
-    lon_span = df['Longitude'].max() - df['Longitude'].min()
-
-    # Split into two lanes
-    if lat_span > lon_span: # Tall
-        mid_val = df['Longitude'].median()
-        lane1 = df[df['Longitude'] <= mid_val].copy()
-        lane2 = df[df['Longitude'] > mid_val].copy()
-        sort_col = 'Latitude'
-    else: # Wide
-        mid_val = df['Latitude'].median()
-        lane1 = df[df['Latitude'] <= mid_val].copy()
-        lane2 = df[df['Latitude'] > mid_val].copy()
-        sort_col = 'Longitude'
-
-    # Determine Entry
-    if not lane1.empty:
-        l1_min_pt = lane1.loc[lane1[sort_col].idxmin()]
-        l1_max_pt = lane1.loc[lane1[sort_col].idxmax()]
-        dist_to_min = haversine(start_lat, start_lon, l1_min_pt.Latitude, l1_min_pt.Longitude)
-        dist_to_max = haversine(start_lat, start_lon, l1_max_pt.Latitude, l1_max_pt.Longitude)
-        l1_ascending = dist_to_min < dist_to_max
-        lane1 = lane1.sort_values(by=sort_col, ascending=l1_ascending)
-    else:
-        l1_ascending = True
-
-    # Snake back
-    if not lane2.empty:
-        lane2 = lane2.sort_values(by=sort_col, ascending=not l1_ascending)
-
-    return pd.concat([lane1, lane2]).reset_index(drop=True)
-
-def get_optimized_sequence(df, start_lat, start_lon, zones):
-    remaining = df.copy()
-    full_sequence = []
+    full_route = []
     curr_lat, curr_lon = start_lat, start_lon
 
-    # --- FIX: Handle Start Point First ---
-    # Find orders exactly at the warehouse/start location and prioritize them
-    # so we don't route back to them later.
+    # Process each Priority Level sequentially
+    unique_priorities = sorted(df['Priority'].unique())
+
+    for prio in unique_priorities:
+        # Get all stops in this priority level
+        cluster = df[df['Priority'] == prio].copy()
+
+        # NEAREST NEIGHBOR LOGIC within the cluster
+        while not cluster.empty:
+            dists = cluster.apply(
+                lambda row: haversine(curr_lat, curr_lon, row['Latitude'], row['Longitude']),
+                axis=1
+            )
+            closest_idx = dists.idxmin()
+            closest_row = cluster.loc[closest_idx]
+
+            full_route.append(closest_row)
+            curr_lat, curr_lon = closest_row['Latitude'], closest_row['Longitude']
+            cluster = cluster.drop(closest_idx)
+
+    return pd.DataFrame(full_route)
+
+def get_optimized_sequence(df, start_lat, start_lon):
+    # Ensure all rows have a priority (fill missing with 5)
+    df['Priority'] = df['Priority'].fillna(5)
+
+    remaining = df.copy()
+
+    # --- HANDLE START POINT ---
+    # Lock start point if present
     start_matches = remaining[
-        (np.abs(remaining['Latitude'] - start_lat) < 0.01) &
-        (np.abs(remaining['Longitude'] - start_lon) < 0.01)
+        (np.abs(remaining['Latitude'] - start_lat) < 0.005) &
+        (np.abs(remaining['Longitude'] - start_lon) < 0.005)
     ]
 
+    pre_sequence = []
     if not start_matches.empty:
-        full_sequence.append(start_matches)
+        pre_sequence.append(start_matches)
         remaining = remaining.drop(start_matches.index)
-        # Update pointer to start, effectively saying "We are here now"
-        # curr_lat/lon remains start_lat/lon
-    # -------------------------------------
+        # Update start coordinates
+        start_lat = start_matches.iloc[0]['Latitude']
+        start_lon = start_matches.iloc[0]['Longitude']
 
-    for zone in zones:
-        zdf = remaining[remaining.Zone == zone]
-        if zdf.empty: continue
+    # Run Priority Routing on the rest
+    routed_df = route_priority_nearest(remaining, start_lat, start_lon)
 
-        # Apply the Generalized Corridor Sweep
-        routed = route_as_corridor_sweep(zdf, curr_lat, curr_lon)
-        full_sequence.append(routed)
-
-        # End trip at the last stop
-        last_stop = routed.iloc[-1]
-        curr_lat, curr_lon = last_stop.Latitude, last_stop.Longitude
-        remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
-
-    return pd.concat(full_sequence) if full_sequence else pd.DataFrame()
+    if pre_sequence:
+        return pd.concat(pre_sequence + [routed_df])
+    return routed_df
 
 # ==================================================
 # GENERATORS
 # ==================================================
 def generate_plans(data, total_available_staff, max_cap):
-    w1_data = data[data.Zone.isin(WH1_ZONES)]
-    w2_data = data[~data.Pincode.isin(w1_data.Pincode)]
+    w1_data = data[data.Zone.isin(WH1_ZONES)].copy()
+    w2_data = data[~data.Pincode.isin(w1_data.Pincode)].copy()
 
-    seq_w1 = get_optimized_sequence(w1_data, WH1_LAT, WH1_LON, WH1_ZONES)
-    seq_w2 = get_optimized_sequence(w2_data, WH2_LAT, WH2_LON, WH2_ZONES)
+    seq_w1 = get_optimized_sequence(w1_data, WH1_LAT, WH1_LON)
+    seq_w2 = get_optimized_sequence(w2_data, WH2_LAT, WH2_LON)
 
     # PLAN A Logic
     def plan_a_logic(ordered_df, wh_name, cap, start_id):
@@ -292,7 +247,14 @@ if st.button("Generate Dispatch Sheets") and uploaded_file:
     raw.columns = [c.strip() for c in raw.columns]
     raw['Pincode'] = raw['Pincode'].astype(str).str.strip()
 
-    master_df = pd.DataFrame([{"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2]} for k, v in PINCODE_MASTER.items()])
+    # Create Master DataFrame with Priority
+    master_rows = []
+    for k, v in PINCODE_MASTER.items():
+        # Handle format (Lat, Lon, Zone, Priority) or (Lat, Lon, Zone)
+        prio = v[3] if len(v) > 3 else 5
+        master_rows.append({"Pincode": k, "Latitude": v[0], "Longitude": v[1], "Zone": v[2], "Priority": prio})
+
+    master_df = pd.DataFrame(master_rows)
     merged = raw.groupby('Pincode', as_index=False)['Orders'].sum().merge(master_df, on="Pincode", how="inner")
 
     plan_a, plan_b, total_needed = generate_plans(merged, staff_count, max_cap_input)
@@ -319,5 +281,5 @@ if st.session_state.results:
     c2.download_button("Download Plan B (Split)", st.session_state.results["B"].to_csv(index=False), "Plan_B_Dispatch.csv")
 
     st.write("Preview: Plan A Route Sequence")
-    st.dataframe(st.session_state.results["A"][['Warehouse', 'Biker_ID', 'Pincode', 'Orders', 'Zone']])
+    st.dataframe(st.session_state.results["A"][['Warehouse', 'Biker_ID', 'Pincode', 'Orders', 'Priority', 'Zone']])
 
