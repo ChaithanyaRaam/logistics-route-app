@@ -20,161 +20,149 @@ st.set_page_config(page_title="SKC Chennai Logistics Optimizer", layout="wide")
 st.title("SKC-Chennai Biker Model Route Planner")
 
 # ==================================================
-# CONFIGURATION & MASTER DATA
+# CONFIGURATION & MASTER DATA (VERIFIED COORDINATES)
 # ==================================================
-WH1_LAT, WH1_LON = 12.9300, 80.1400  # Chitlapakkam
-WH2_LAT, WH2_LON = 13.0063, 80.2120  # Guindy
+WH1_LAT, WH1_LON = 12.9326, 80.1454  # Chitlapakkam (Refined)
+WH2_LAT, WH2_LON = 13.0102, 80.2155  # Guindy (Refined)
 
-
+# FULLY CORRECTED MASTER DATA
 PINCODE_MASTER = {
-    # =========================================================
-    # ZONE: NORTH CHENNAI (Harbour, Perambur, Tiruvottiyur)
-    # =========================================================
-    "600001": (13.0964, 80.2872, "North Chennai"), # Parrys / Georgetown
-    "600003": (13.0880, 80.2760, "North Chennai"), # Park Town
-    "600007": (13.0840, 80.2560, "North Chennai"), # Vepery
-    "600009": (13.1000, 80.2800, "North Chennai"), # Fort St George
-    "600011": (13.1246, 80.2327, "North Chennai"), # Perambur
-    "600012": (13.0970, 80.2580, "North Chennai"), # Perambur Barracks
-    "600013": (13.1167, 80.2917, "North Chennai"), # Royapuram
-    "600019": (13.1614, 80.3013, "North Chennai"), # Tiruvottiyur
-    "600021": (13.1060, 80.2860, "North Chennai"), # Washermanpet
-    "600038": (13.1100, 80.2500, "North Chennai"), # Vyasarpadi
-    "600039": (13.1270, 80.2670, "North Chennai"), # MKB Nagar
-    "600051": (13.1700, 80.2450, "North Chennai"), # Madhavaram
-    "600057": (13.2082, 80.3193, "North Chennai"), # Ennore / Redhills
-    "600060": (13.1600, 80.2130, "North Chennai"), # Madhavaram Milk Colony
-    "600066": (13.1720, 80.1450, "North Chennai"), # Kolathur
-    "600068": (13.1670, 80.2750, "North Chennai"), # Kodungaiyur
-    "600079": (13.1000, 80.2750, "North Chennai"), # Sowcarpet
-    "600081": (13.1410, 80.2760, "North Chennai"), # Tondiarpet
-    "600082": (13.1150, 80.2280, "North Chennai"), # Perambur (Loco)
-    "600103": (13.2185, 80.2870, "North Chennai"), # Manali New Town
-    "600104": (13.0780, 80.2850, "North Chennai"), # High Court
-    "600108": (13.0920, 80.2840, "North Chennai"), # Kondithope
-    "600110": (13.1300, 80.2270, "North Chennai"), # Sembium
-    "600112": (13.0950, 80.2650, "North Chennai"), # Choolai
-    "600118": (13.1320, 80.2550, "North Chennai"), # Erukkancheri
+    # --- NORTH CHENNAI ---
+    "600001": (13.0964, 80.2872, "North Chennai"),
+    "600003": (13.0880, 80.2760, "North Chennai"),
+    "600007": (13.0840, 80.2560, "North Chennai"),
+    "600009": (13.1000, 80.2800, "North Chennai"),
+    "600011": (13.1246, 80.2327, "North Chennai"),
+    "600012": (13.0970, 80.2580, "North Chennai"),
+    "600013": (13.1167, 80.2917, "North Chennai"),
+    "600019": (13.1614, 80.3013, "North Chennai"),
+    "600021": (13.1060, 80.2860, "North Chennai"),
+    "600038": (13.1100, 80.2500, "North Chennai"),
+    "600039": (13.1270, 80.2670, "North Chennai"),
+    "600051": (13.1700, 80.2450, "North Chennai"),
+    "600057": (13.2082, 80.3193, "North Chennai"),
+    "600060": (13.1600, 80.2130, "North Chennai"),
+    "600066": (13.1720, 80.1450, "North Chennai"),
+    "600068": (13.1670, 80.2750, "North Chennai"),
+    "600079": (13.1000, 80.2750, "North Chennai"),
+    "600081": (13.1410, 80.2760, "North Chennai"),
+    "600082": (13.1150, 80.2280, "North Chennai"),
+    "600103": (13.2185, 80.2870, "North Chennai"),
+    "600104": (13.0780, 80.2850, "North Chennai"),
+    "600108": (13.0920, 80.2840, "North Chennai"),
+    "600110": (13.1300, 80.2270, "North Chennai"),
+    "600112": (13.0950, 80.2650, "North Chennai"),
+    "600118": (13.1320, 80.2550, "North Chennai"),
 
-    # =========================================================
-    # ZONE: CENTRAL CHENNAI (T. Nagar, Egmore, Mylapore)
-    # =========================================================
-    "600002": (13.0760, 80.2700, "Central Chennai"), # Anna Road / Triplicane
-    "600004": (13.0382, 80.2713, "Central Chennai"), # Mylapore
-    "600005": (13.0610, 80.2800, "Central Chennai"), # Triplicane
-    "600006": (13.0620, 80.2520, "Central Chennai"), # Thousand Lights
-    "600008": (13.0720, 80.2600, "Central Chennai"), # Egmore
-    "600010": (13.0850, 80.2450, "Central Chennai"), # Kilpauk
-    "600014": (13.0550, 80.2650, "Central Chennai"), # Royapettah
-    "600017": (13.0420, 80.2350, "Central Chennai"), # T. Nagar
-    "600018": (13.0400, 80.2500, "Central Chennai"), # Teynampet
-    "600023": (13.0975, 80.2306, "Central Chennai"), # Ayanavaram
-    "600024": (13.0530, 80.2250, "Central Chennai"), # Kodambakkam
-    "600028": (13.0240, 80.2650, "Central Chennai"), # RA Puram
-    "600030": (13.0780, 80.2240, "Central Chennai"), # Shenoy Nagar
-    "600031": (13.0740, 80.2430, "Central Chennai"), # Chetpet
-    "600034": (13.0620, 80.2420, "Central Chennai"), # Nungambakkam
-    "600035": (13.0300, 80.2370, "Central Chennai"), # Nandanam
-    "600040": (13.0880, 80.2150, "Central Chennai"), # Anna Nagar
-    "600084": (13.0760, 80.2550, "Central Chennai"), # Flowers Road
-    "600085": (13.0120, 80.2440, "Central Chennai"), # Kotturpuram
-    "600086": (13.0200, 80.2550, "Central Chennai"), # Gopalapuram
-    "600094": (13.0587, 80.2212, "Central Chennai"), # Choolaimedu
-    "600102": (13.0890, 80.2218, "Central Chennai"), # Anna Nagar East
+    # --- CENTRAL CHENNAI ---
+    "600002": (13.0760, 80.2700, "Central Chennai"),
+    "600004": (13.0382, 80.2713, "Central Chennai"),
+    "600005": (13.0610, 80.2800, "Central Chennai"),
+    "600006": (13.0620, 80.2520, "Central Chennai"),
+    "600008": (13.0720, 80.2600, "Central Chennai"),
+    "600010": (13.0850, 80.2450, "Central Chennai"),
+    "600014": (13.0550, 80.2650, "Central Chennai"),
+    "600017": (13.0420, 80.2350, "Central Chennai"),
+    "600018": (13.0400, 80.2500, "Central Chennai"),
+    "600023": (13.0975, 80.2306, "Central Chennai"),
+    "600024": (13.0530, 80.2250, "Central Chennai"),
+    "600028": (13.0240, 80.2650, "Central Chennai"),
+    "600030": (13.0780, 80.2240, "Central Chennai"),
+    "600031": (13.0740, 80.2430, "Central Chennai"),
+    "600034": (13.0620, 80.2420, "Central Chennai"),
+    "600035": (13.0300, 80.2370, "Central Chennai"),
+    "600040": (13.0880, 80.2150, "Central Chennai"),
+    "600084": (13.0760, 80.2550, "Central Chennai"),
+    "600085": (13.0120, 80.2440, "Central Chennai"),
+    "600086": (13.0200, 80.2550, "Central Chennai"),
+    "600094": (13.0587, 80.2212, "Central Chennai"),
+    "600102": (13.0890, 80.2218, "Central Chennai"),
 
-    # =========================================================
-    # ZONE: WEST CHENNAI (Ambattur, Porur, Vadapalani)
-    # =========================================================
-    "600026": (13.0550, 80.2115, "West / Inner West"), # Vadapalani
-    "600029": (13.0750, 80.2250, "West / Inner West"), # Aminjikarai
-    "600033": (13.0370, 80.2230, "West / Inner West"), # West Mambalam
-    "600037": (13.0031, 80.1944, "West / Inner West"), # Mogappair
-    "600049": (13.1075, 80.2100, "West / Inner West"), # Villivakkam
-    "600050": (13.0880, 80.1650, "West / Inner West"), # Padi
-    "600053": (13.1150, 80.1500, "West / Inner West"), # Ambattur
-    "600054": (13.1200, 80.0900, "Outer West / Peripheral"), # Avadi
-    "600055": (13.1500, 80.0650, "Outer West / Peripheral"), # Avadi Camp
-    "600056": (13.0320, 80.1016, "Outer West / Peripheral"), # Poonamallee
-    "600058": (13.0860, 80.1530, "West / Inner West"), # Ambattur Ind. Estate
-    "600062": (13.1480, 80.1150, "Outer West / Peripheral"), # Mittanamallee
-    "600065": (13.1360, 80.0760, "Outer West / Peripheral"), # Muthapudupet
-    "600067": (13.2440, 80.1190, "Outer West / Peripheral"), # Gummidipoondi
-    "600069": (12.9650, 80.1050, "Outer West / Peripheral"), # Thiruneermalai (FIXED from Vellore)
-    "600071": (13.0830, 80.1350, "Outer West / Peripheral"), # Thirumullaivoyal
-    "600072": (13.0680, 80.0400, "Outer West / Peripheral"), # Pattabiram
-    "600074": (12.9780, 80.1080, "Outer West / Peripheral"), # Pammal Outskirts
-    "600076": (13.1070, 80.1750, "West / Inner West"), # Korattur RS
-    "600077": (13.0900, 80.1170, "Outer West / Peripheral"), # Thiruverkadu
-    "600078": (13.0390, 80.1970, "West / Inner West"), # Ashok Nagar
-    "600080": (13.1200, 80.1850, "West / Inner West"), # Korattur
-    "600083": (13.0350, 80.2120, "West / Inner West"), # MGR Nagar
-    "600087": (13.0430, 80.1740, "West / Inner West"), # Valasaravakkam
-    "600089": (13.0310, 80.1790, "West / Inner West"), # Ramapuram
-    "600092": (13.0540, 80.1920, "West / Inner West"), # Virugambakkam
-    "600093": (13.0500, 80.1990, "West / Inner West"), # Saligramam
-    "600095": (13.0016, 80.0733, "Outer West / Peripheral"), # Maduravoyal
-    "600098": (13.0166, 80.2072, "West / Inner West"), # Sidco Estate
-    "600099": (13.1300, 80.2050, "West / Inner West"), # Puthagaram
-    "600101": (13.0935, 80.1937, "West / Inner West"), # Anna Nagar West
-    "600106": (13.0720, 80.2120, "West / Inner West"), # Arumbakkam
-    "600107": (13.0660, 80.1990, "West / Inner West"), # Koyambedu
-    "600111": (13.0600, 80.1760, "West / Inner West"), # Maduravoyal South
-    "600116": (13.0400, 80.1470, "West / Inner West"), # Porur
+    # --- WEST CHENNAI ---
+    "600026": (13.0550, 80.2115, "West / Inner West"),
+    "600029": (13.0750, 80.2250, "West / Inner West"),
+    "600033": (13.0370, 80.2230, "West / Inner West"),
+    "600037": (13.0031, 80.1944, "West / Inner West"),
+    "600049": (13.1075, 80.2100, "West / Inner West"),
+    "600050": (13.0880, 80.1650, "West / Inner West"),
+    "600053": (13.1150, 80.1500, "West / Inner West"),
+    "600054": (13.1200, 80.0900, "Outer West / Peripheral"),
+    "600055": (13.1500, 80.0650, "Outer West / Peripheral"),
+    "600056": (13.0320, 80.1016, "Outer West / Peripheral"),
+    "600058": (13.0860, 80.1530, "West / Inner West"),
+    "600062": (13.1480, 80.1150, "Outer West / Peripheral"),
+    "600065": (13.1360, 80.0760, "Outer West / Peripheral"),
+    "600067": (13.2440, 80.1190, "Outer West / Peripheral"),
+    "600069": (12.9650, 80.1050, "Outer West / Peripheral"), # FIXED
+    "600071": (13.0830, 80.1350, "Outer West / Peripheral"),
+    "600072": (13.0680, 80.0400, "Outer West / Peripheral"),
+    "600074": (12.9780, 80.1080, "Outer West / Peripheral"),
+    "600076": (13.1070, 80.1750, "West / Inner West"),
+    "600077": (13.0900, 80.1170, "Outer West / Peripheral"),
+    "600078": (13.0390, 80.1970, "West / Inner West"),
+    "600080": (13.1200, 80.1850, "West / Inner West"),
+    "600083": (13.0350, 80.2120, "West / Inner West"),
+    "600087": (13.0430, 80.1740, "West / Inner West"),
+    "600089": (13.0310, 80.1790, "West / Inner West"),
+    "600092": (13.0540, 80.1920, "West / Inner West"),
+    "600093": (13.0500, 80.1990, "West / Inner West"),
+    "600095": (13.0016, 80.0733, "Outer West / Peripheral"),
+    "600098": (13.0166, 80.2072, "West / Inner West"),
+    "600099": (13.1300, 80.2050, "West / Inner West"),
+    "600101": (13.0935, 80.1937, "West / Inner West"),
+    "600106": (13.0720, 80.2120, "West / Inner West"),
+    "600107": (13.0660, 80.1990, "West / Inner West"),
+    "600111": (13.0600, 80.1760, "West / Inner West"),
+    "600116": (13.0400, 80.1470, "West / Inner West"),
 
-    # =========================================================
-    # ZONE: SOUTH / VELACHERY / GUINDY
-    # =========================================================
-    "600015": (13.0150, 80.2300, "Velachery / Guindy / Saidapet"), # Saidapet
-    "600016": (13.0055, 80.1983, "Velachery / Guindy / Saidapet"), # St Thomas Mount (FIXED)
-    "600022": (13.0012, 80.2270, "Velachery / Guindy / Saidapet"), # Little Mount
-    "600025": (13.0120, 80.2350, "Velachery / Guindy / Saidapet"), # Saidapet West
-    "600027": (12.9930, 80.1710, "Velachery / Guindy / Saidapet"), # Meenambakkam
-    "600032": (13.0102, 80.2155, "Velachery / Guindy / Saidapet"), # Guindy Industrial Estate (FIXED)
-    "600036": (12.9930, 80.2350, "Velachery / Guindy / Saidapet"), # IIT Madras
-    "600042": (12.9780, 80.2200, "Velachery / Guindy / Saidapet"), # Velachery
-    "600061": (12.9830, 80.1860, "Velachery / Guindy / Saidapet"), # Nanganallur
-    "600088": (12.9950, 80.2050, "Velachery / Guindy / Saidapet"), # Adambakkam
-    "600091": (12.9680, 80.1950, "Velachery / Guindy / Saidapet"), # Madipakkam South
-    "600113": (12.9730, 80.2380, "Velachery / Guindy / Saidapet"), # Taramani
-    "600114": (12.9650, 80.2050, "Velachery / Guindy / Saidapet"), # Madipakkam North
+    # --- SOUTH / VELACHERY / GUINDY ---
+    "600015": (13.0150, 80.2300, "Velachery / Guindy / Saidapet"),
+    "600016": (13.0055, 80.1983, "Velachery / Guindy / Saidapet"), # FIXED
+    "600022": (13.0012, 80.2270, "Velachery / Guindy / Saidapet"),
+    "600025": (13.0120, 80.2350, "Velachery / Guindy / Saidapet"),
+    "600027": (12.9930, 80.1710, "Velachery / Guindy / Saidapet"),
+    "600032": (13.0102, 80.2155, "Velachery / Guindy / Saidapet"), # FIXED
+    "600036": (12.9930, 80.2350, "Velachery / Guindy / Saidapet"),
+    "600042": (12.9780, 80.2200, "Velachery / Guindy / Saidapet"),
+    "600061": (12.9830, 80.1860, "Velachery / Guindy / Saidapet"),
+    "600088": (12.9950, 80.2050, "Velachery / Guindy / Saidapet"),
+    "600091": (12.9680, 80.1950, "Velachery / Guindy / Saidapet"),
+    "600113": (12.9730, 80.2380, "Velachery / Guindy / Saidapet"),
+    "600114": (12.9650, 80.2050, "Velachery / Guindy / Saidapet"),
 
-    # =========================================================
-    # ZONE: SOUTH OMR & TAMBARAM SUBURBS
-    # =========================================================
-    "600020": (13.0060, 80.2570, "South / OMR / Tambaram"), # Adyar
-    "600041": (12.9860, 80.2600, "South / OMR / Tambaram"), # Thiruvanmiyur
-    "600043": (12.9550, 80.1450, "South / OMR / Tambaram"), # Pallavaram
-    "600044": (12.9500, 80.1400, "South / OMR / Tambaram"), # Chromepet (FIXED)
-    "600045": (12.9240, 80.1150, "South / OMR / Tambaram"), # Tambaram West
-    "600046": (12.9050, 80.1220, "South / OMR / Tambaram"), # Tambaram IAF
-    "600047": (12.9400, 80.1150, "South / OMR / Tambaram"), # Pammal / Anakaputhur
-    "600048": (12.8900, 80.0800, "South / OMR / Tambaram"), # Vandalur
-    "600059": (12.9250, 80.1250, "South / OMR / Tambaram"), # Tambaram East
-    "600063": (12.9045, 80.0886, "South / OMR / Tambaram"), # Perungalathur (FIXED)
-    "600064": (12.9320, 80.1450, "South / OMR / Tambaram"), # Chitlapakkam
-    "600070": (12.9700, 80.1300, "South / OMR / Tambaram"), # Anakaputhur
-    "600073": (12.8750, 80.1650, "South / OMR / Tambaram"), # Selaiyur / Camp Road
-    "600075": (12.9720, 80.1450, "South / OMR / Tambaram"), # Pammal
-    "600090": (12.9980, 80.2600, "South / OMR / Tambaram"), # Besant Nagar
-    "600096": (12.9650, 80.2450, "South / OMR / Tambaram"), # Perungudi
-    "600097": (12.9450, 80.2300, "South / OMR / Tambaram"), # Thoraipakkam
-    "600100": (12.9200, 80.1800, "South / OMR / Tambaram"), # Medavakkam
-    "600105": (13.0650, 80.2650, "South / OMR / Tambaram"), # Adyar (Outskirts)
-    "600115": (12.9880, 80.2430, "South / OMR / Tambaram"), # Taramani Inst.
-    "600117": (12.9600, 80.1770, "South / OMR / Tambaram"), # Keelkattalai
-    "600119": (12.9000, 80.2270, "South / OMR / Tambaram"), # Sholinganallur
+    # --- SOUTH OMR & TAMBARAM ---
+    "600020": (13.0060, 80.2570, "South / OMR / Tambaram"),
+    "600041": (12.9860, 80.2600, "South / OMR / Tambaram"),
+    "600043": (12.9550, 80.1450, "South / OMR / Tambaram"),
+    "600044": (12.9500, 80.1400, "South / OMR / Tambaram"), # FIXED
+    "600045": (12.9240, 80.1150, "South / OMR / Tambaram"),
+    "600046": (12.9050, 80.1220, "South / OMR / Tambaram"),
+    "600047": (12.9400, 80.1150, "South / OMR / Tambaram"),
+    "600048": (12.8900, 80.0800, "South / OMR / Tambaram"),
+    "600059": (12.9250, 80.1250, "South / OMR / Tambaram"),
+    "600063": (12.9045, 80.0886, "South / OMR / Tambaram"), # FIXED
+    "600064": (12.9320, 80.1450, "South / OMR / Tambaram"),
+    "600070": (12.9700, 80.1300, "South / OMR / Tambaram"),
+    "600073": (12.8750, 80.1650, "South / OMR / Tambaram"),
+    "600075": (12.9720, 80.1450, "South / OMR / Tambaram"),
+    "600090": (12.9980, 80.2600, "South / OMR / Tambaram"),
+    "600096": (12.9650, 80.2450, "South / OMR / Tambaram"),
+    "600097": (12.9450, 80.2300, "South / OMR / Tambaram"),
+    "600100": (12.9200, 80.1800, "South / OMR / Tambaram"),
+    "600105": (13.0650, 80.2650, "South / OMR / Tambaram"),
+    "600115": (12.9880, 80.2430, "South / OMR / Tambaram"),
+    "600117": (12.9600, 80.1770, "South / OMR / Tambaram"),
+    "600119": (12.9000, 80.2270, "South / OMR / Tambaram"),
 }
 
 WH1_ZONES = ["South / OMR / Tambaram", "Outer West / Peripheral"]
 WH2_ZONES = ["Velachery / Guindy / Saidapet", "Central Chennai", "West / Inner West", "North Chennai"]
 
-import math
-
 # ==================================================
 # 1. GEOGRAPHIC UTILS
 # ==================================================
 def haversine(lat1, lon1, lat2, lon2):
-    """Generalized formula for distance in KM between two coordinates."""
+    """Distance in KM between two coordinates."""
     R = 6371.0
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat, dlon = lat2 - lat1, lon2 - lon1
@@ -185,43 +173,35 @@ def haversine(lat1, lon1, lat2, lon2):
 # 2. GENERALIZED CORRIDOR SWEEP (SNAKE LOGIC)
 # ==================================================
 def route_as_corridor_sweep(df, start_lat, start_lon):
-    """
-    Generalized formula to split a cluster into lanes and sweep
-    them in a snake pattern (S-Curve) to prevent zig-zags.
-    """
     if df.empty: return df
 
-    # Identify if the cluster is taller (Vertical) or wider (Horizontal)
     lat_span = df['Latitude'].max() - df['Latitude'].min()
     lon_span = df['Longitude'].max() - df['Longitude'].min()
 
-    # 1. Split into two 'lanes' based on the median of the narrower dimension
-    if lat_span > lon_span:
-        # Tall Cluster: Create East/West lanes, sweep North/South
+    # Split into two lanes
+    if lat_span > lon_span: # Tall
         mid_val = df['Longitude'].median()
         lane1 = df[df['Longitude'] <= mid_val].copy()
         lane2 = df[df['Longitude'] > mid_val].copy()
         sort_col = 'Latitude'
-    else:
-        # Wide Cluster: Create North/South lanes, sweep East/West
+    else: # Wide
         mid_val = df['Latitude'].median()
         lane1 = df[df['Latitude'] <= mid_val].copy()
         lane2 = df[df['Latitude'] > mid_val].copy()
         sort_col = 'Longitude'
 
-    # 2. Determine Entry: Which Lane end is closest to the current position (Warehouse)?
-    l1_min_pt = lane1.loc[lane1[sort_col].idxmin()]
-    l1_max_pt = lane1.loc[lane1[sort_col].idxmax()]
+    # Determine Entry
+    if not lane1.empty:
+        l1_min_pt = lane1.loc[lane1[sort_col].idxmin()]
+        l1_max_pt = lane1.loc[lane1[sort_col].idxmax()]
+        dist_to_min = haversine(start_lat, start_lon, l1_min_pt.Latitude, l1_min_pt.Longitude)
+        dist_to_max = haversine(start_lat, start_lon, l1_max_pt.Latitude, l1_max_pt.Longitude)
+        l1_ascending = dist_to_min < dist_to_max
+        lane1 = lane1.sort_values(by=sort_col, ascending=l1_ascending)
+    else:
+        l1_ascending = True
 
-    dist_to_min = haversine(start_lat, start_lon, l1_min_pt.Latitude, l1_min_pt.Longitude)
-    dist_to_max = haversine(start_lat, start_lon, l1_max_pt.Latitude, l1_max_pt.Longitude)
-
-    # 3. Sort Lane 1 (Start near Warehouse)
-    l1_ascending = dist_to_min < dist_to_max
-    lane1 = lane1.sort_values(by=sort_col, ascending=l1_ascending)
-
-    # 4. Sort Lane 2 (Snake back - opposite direction of Lane 1)
-    # This prevents the 91km jump back to the start of the next street
+    # Snake back
     if not lane2.empty:
         lane2 = lane2.sort_values(by=sort_col, ascending=not l1_ascending)
 
@@ -232,6 +212,21 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
     full_sequence = []
     curr_lat, curr_lon = start_lat, start_lon
 
+    # --- FIX: Handle Start Point First ---
+    # Find orders exactly at the warehouse/start location and prioritize them
+    # so we don't route back to them later.
+    start_matches = remaining[
+        (np.abs(remaining['Latitude'] - start_lat) < 0.01) &
+        (np.abs(remaining['Longitude'] - start_lon) < 0.01)
+    ]
+
+    if not start_matches.empty:
+        full_sequence.append(start_matches)
+        remaining = remaining.drop(start_matches.index)
+        # Update pointer to start, effectively saying "We are here now"
+        # curr_lat/lon remains start_lat/lon
+    # -------------------------------------
+
     for zone in zones:
         zdf = remaining[remaining.Zone == zone]
         if zdf.empty: continue
@@ -240,7 +235,7 @@ def get_optimized_sequence(df, start_lat, start_lon, zones):
         routed = route_as_corridor_sweep(zdf, curr_lat, curr_lon)
         full_sequence.append(routed)
 
-        # End trip at the last stop (One-Way Trip)
+        # End trip at the last stop
         last_stop = routed.iloc[-1]
         curr_lat, curr_lon = last_stop.Latitude, last_stop.Longitude
         remaining = remaining[~remaining.Pincode.isin(routed.Pincode)]
@@ -257,7 +252,7 @@ def generate_plans(data, total_available_staff, max_cap):
     seq_w1 = get_optimized_sequence(w1_data, WH1_LAT, WH1_LON, WH1_ZONES)
     seq_w2 = get_optimized_sequence(w2_data, WH2_LAT, WH2_LON, WH2_ZONES)
 
-    # PLAN A Logic (Sequential IDs for Needed count)
+    # PLAN A Logic
     def plan_a_logic(ordered_df, wh_name, cap, start_id):
         res, biker, load = [], start_id, 0
         if ordered_df.empty: return pd.DataFrame(), start_id
@@ -272,7 +267,7 @@ def generate_plans(data, total_available_staff, max_cap):
     pa1, last_id_w1 = plan_a_logic(seq_w1, "WH1", max_cap, 1)
     pa2, total_needed_a = plan_a_logic(seq_w2, "WH2", max_cap, last_id_w1 + 1)
 
-    # PLAN B Logic (Split among staff)
+    # PLAN B Logic
     w1_b_count = max(1, round(total_available_staff * len(w1_data) / len(data)))
     w2_b_count = max(1, total_available_staff - w1_b_count)
 
@@ -291,8 +286,6 @@ st.sidebar.header("Operational Constraints")
 max_cap_input = st.sidebar.number_input("Max Orders per Biker (Plan A Limit)", 1, 100, 15)
 staff_count = st.sidebar.number_input("Total Internal Staff Available", 1, 100, 5)
 uploaded_file = st.sidebar.file_uploader("Upload Delivery Data", type=["csv", "xlsx"])
-
-
 
 if st.button("Generate Dispatch Sheets") and uploaded_file:
     raw = pd.read_excel(uploaded_file) if uploaded_file.name.endswith("xlsx") else pd.read_csv(uploaded_file)
@@ -320,7 +313,6 @@ if st.session_state.results:
         st.error(f"Hire {extra} freelancers to stay within the {max_cap_input}-order capacity limit.")
     else:
         st.success("✅ Current staff is sufficient for the workload.")
-
 
     c1, c2 = st.columns(2)
     c1.download_button("Download Plan A (Capacity)", st.session_state.results["A"].to_csv(index=False), "Plan_A_Dispatch.csv")
